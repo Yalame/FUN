@@ -39,9 +39,11 @@ and **Load backup** to restore it or move it to another device (merge or replace
 
 ## Install
 
-- **Mac:** double-click `Start CHAMPIONS.command` (or open `http://localhost:8777`).
-  In Safari: File → Add to Dock. In Chrome: the install icon in the address bar.
-- **iPhone:** the app must be online at an `https://` address (e.g. GitHub Pages).
-  Open that address in Safari → Share → **Add to Home Screen**.
+**Live app: https://yalame.github.io/FUN/**
+
+- **iPhone:** open the link in **Safari** → Share → **Add to Home Screen**.
+- **Mac:** open the link in Safari → File → **Add to Dock** (Chrome: the install icon in the address bar).
+- **Offline on this Mac without the link:** double-click `Start CHAMPIONS.command` (opens `http://localhost:8777`).
+  Note: each address keeps its own history, so stick to one per device.
 
 When you change the files, bump `VERSION` in `sw.js` so installed copies refresh.
