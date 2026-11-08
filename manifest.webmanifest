@@ -1,0 +1,17 @@
+{
+  "name": "CHAMPIONS — Poker Night",
+  "short_name": "CHAMPIONS",
+  "description": "Poker night points, champions, money and the bill — all sorted.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#04210f",
+  "theme_color": "#0a3a22",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

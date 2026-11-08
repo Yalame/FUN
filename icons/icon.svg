@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="felt" cx="50%" cy="32%" r="78%">
+      <stop offset="0" stop-color="#27a663"/>
+      <stop offset=".5" stop-color="#0f5a34"/>
+      <stop offset="1" stop-color="#03200f"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff4b8"/>
+      <stop offset=".5" stop-color="#f5c542"/>
+      <stop offset="1" stop-color="#b9820f"/>
+    </linearGradient>
+    <linearGradient id="spade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e9e2cf"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#felt)"/>
+  <!-- poker chip ring -->
+  <circle cx="512" cy="560" r="352" fill="none" stroke="#f5c542" stroke-opacity=".28" stroke-width="22" stroke-dasharray="70 44"/>
+  <circle cx="512" cy="560" r="318" fill="none" stroke="#ffffff" stroke-opacity=".08" stroke-width="4"/>
+  <!-- spade -->
+  <g transform="translate(287 340) scale(4.5)">
+    <path d="M50 4C50 4 8 38 8 62c0 15 13 25 27 22 6-1 10-5 12-9-1 10-6 17-14 21h34c-8-4-13-11-14-21 2 4 6 8 12 9 14 3 27-7 27-22C92 38 50 4 50 4z"
+      fill="url(#spade)" stroke="#000" stroke-opacity=".25" stroke-width="1.5"/>
+  </g>
+  <!-- crown -->
+  <g transform="translate(332 120) scale(5.6)">
+    <path d="M5 17l13 11L32 7l14 21 13-11-5 25H10z" fill="url(#gold)" stroke="#6b4700" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="5" cy="16" r="4" fill="url(#gold)" stroke="#6b4700" stroke-width="1.6"/>
+    <circle cx="32" cy="6" r="4" fill="url(#gold)" stroke="#6b4700" stroke-width="1.6"/>
+    <circle cx="59" cy="16" r="4" fill="url(#gold)" stroke="#6b4700" stroke-width="1.6"/>
+    <rect x="10" y="40" width="44" height="6" rx="2" fill="url(#gold)" stroke="#6b4700" stroke-width="1.6"/>
+    <circle cx="32" cy="32" r="3.4" fill="#e5484d"/>
+    <circle cx="20" cy="34" r="2.6" fill="#2f6fe0"/>
+    <circle cx="44" cy="34" r="2.6" fill="#1f9d55"/>
+  </g>
+</svg>
