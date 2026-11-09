@@ -456,7 +456,7 @@
   /* ================= team sync ================= */
   // The team's shared data lives in a secret GitHub gist. Every phone reads it
   // (no limit, no login); phones with the team key also save to it.
-  const TEAM_DEFAULT = { owner: 'Yalame', id: '' };
+  const TEAM_DEFAULT = { owner: 'Yalame', id: '29efc50d95647d63b6fbf1dc2eb87b2a' };
   const SYNC_KEY = `${KEY}.sync`;
   function loadSync() {
     let st = {};
