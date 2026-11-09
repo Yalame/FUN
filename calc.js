@@ -103,11 +103,18 @@
     const per = new Map();
     const get = (id) => {
       if (!per.has(id)) {
-        per.set(id, { playerId: id, pts: 0, won: 0, lost: 0, table: 0, pot: 0, roundsWon: 0, roundsPlayed: 0 });
+        per.set(id, { playerId: id, pts: 0, start: 0, won: 0, lost: 0, table: 0, pot: 0, roundsWon: 0, roundsPlayed: 0 });
       }
       return per.get(id);
     };
     (night.playerIds || []).forEach(get);
+    // players who joined late can be given starting points
+    for (const j of night.joins || []) {
+      const p = get(j.playerId);
+      const v = Number(j.pts) || 0;
+      p.start += v;
+      p.pts += v;
+    }
     let potTotal = 0;
     let tableTotal = 0;
     for (const round of night.rounds || []) {
@@ -130,6 +137,7 @@
       return {
         ...p,
         pts: r2(p.pts),
+        start: r2(p.start),
         won: r2(p.won),
         lost: r2(p.lost),
         table: r2(p.table),

@@ -17,7 +17,9 @@ It runs in any browser and installs on iPhone and Mac like a normal app. Works o
 6. **The bill** — at the end the pot is taken off the bill; the rest is paid by the lowest places:
    4 players 50/30/20 %, 5–6 players 40/30/20/10 % (3 players 60/40, 2 players 100 — editable).
    Players tied on points share equally (e.g. 50 + 30 → 40 / 40).
-7. **Champion** — most points of the night (a tie gives two champions).
+7. **Late joiners** — someone joining mid-night can get starting points: last place's points,
+   the table average, 0 or any number (changeable later from the Rounds list).
+8. **Champion** — most points of the night (a tie gives two champions).
 
 All numbers above can be changed in **Settings**.
 
@@ -27,9 +29,24 @@ All numbers above can be changed in **Settings**.
 | --- | --- |
 | `index.html`, `styles.css`, `app.js` | the app screens |
 | `calc.js` | all the math (points, money, fees, bill, rankings) |
-| `tests/calc.test.js` | checks the math — run `node tests/calc.test.js` |
+| `sync.js` | how phones merge their data for team sync |
+| `tests/*.test.js` | checks the math and sync — `node tests/calc.test.js && node tests/sync.test.js` |
 | `sw.js`, `manifest.webmanifest`, `icons/` | install on home screen + offline |
 | `Start CHAMPIONS.command` | double-click to open it on this Mac |
+
+## Team sync (all phones see the same history)
+
+The team's data lives in one secret GitHub gist (`champions-data.json` in Yalame's account).
+
+- **Every phone** with the app downloads it by itself: when the app opens, every 15 s during a game,
+  every minute otherwise. Phones without the team key follow the night live, read-only.
+- **Scorekeeper phones** paste the **team key** once (Settings → Team sync) and upload every change.
+  Make the key at <https://github.com/settings/tokens/new?description=CHAMPIONS%20team%20key&scopes=gist>
+  (only *gist* ticked) and share it privately.
+- Two scorekeepers at once is fine: rounds from both phones are kept, the newest edit wins,
+  deletes stay deleted (`sync.js`, tested in `tests/sync.test.js`).
+- Look & sound settings stay personal to each phone; money rules are shared.
+- Test locally without GitHub: `python3 tests/mock_gist_server.py 8790` (see the file for how).
 
 ## Where the history lives
 

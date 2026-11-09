@@ -91,6 +91,16 @@ test('tied top score → two champions', () => {
   assert.deepStrictEqual(sum.champions.sort(), ['A', 'B']);
 });
 
+test('late joiner: starting points count, money does not change', () => {
+  const rounds = [C.buildRound(1, ['A', 'B', 'C'], {}, S), C.buildRound(1, ['A', 'B', 'C', 'D'], {}, S)];
+  const n = night(['A', 'B', 'C', 'D'], rounds, { joins: [{ id: 'j1', playerId: 'D', pts: 1, afterRound: 1 }] });
+  const p = Object.fromEntries(C.nightSummary(n).players.map((x) => [x.playerId, x]));
+  assert.strictEqual(p.D.start, 1);
+  assert.strictEqual(p.D.pts, 1 + 1); // start 1 + last place in round 2
+  assert.strictEqual(p.D.roundsPlayed, 1);
+  assert.strictEqual(p.D.lost, 10);
+});
+
 console.log('Bill split');
 
 const fakeSummary = (pts, pot = 0, table = 0) => ({

@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const C = window.Calc;
+  const Y = window.SyncLib;
   const KEY = 'champions.v1';
   const APP_VERSION = '1.0';
   const EMOJIS = ['🦁', '🐯', '🦊', '🐺', '🦅', '🐻', '🐼', '🦈', '🐙', '🦄', '🐲', '🦖', '🐸', '🐵', '🦉', '🐝', '🦂', '🐊', '🦬', '🐆', '🦩', '🐧', '🐳', '🦍', '🐗', '🦓', '🐍', '🦚'];
@@ -29,7 +30,7 @@
 
   /* ================= data ================= */
   function freshDb() {
-    return { version: 1, players: [], nights: [], settings: clone(C.DEFAULT_SETTINGS), lastBackup: null };
+    return { version: 1, players: [], nights: [], settings: clone(C.DEFAULT_SETTINGS), settingsUpdatedAt: 0, deleted: Y.emptyDeleted(), lastBackup: null };
   }
   function normalize(d) {
     const base = freshDb();
@@ -41,6 +42,8 @@
       players: Array.isArray(d.players) ? d.players : [],
       nights: Array.isArray(d.nights) ? d.nights : [],
       settings,
+      settingsUpdatedAt: Number(d.settingsUpdatedAt) || 0,
+      deleted: { ...Y.emptyDeleted(), ...(d.deleted || {}) },
       lastBackup: d.lastBackup || null,
     };
   }
@@ -56,20 +59,54 @@
     }
   }
   let db = loadDb();
-  function save() {
+  function saveLocal() {
     try {
       localStorage.setItem(KEY, JSON.stringify(db));
     } catch (e) {
       toast('⚠️ Could not save on this device');
     }
   }
+  /** Save on this phone, and send to the team when this phone has the team key. */
+  function save() {
+    saveLocal();
+    scheduleSync();
+  }
+  // Remember when things change, so phones can merge their data correctly.
+  const touch = (o) => {
+    if (o) o.updatedAt = Date.now();
+    return o;
+  };
+  const tomb = (kind, id) => {
+    db.deleted = db.deleted || Y.emptyDeleted();
+    db.deleted[kind][id] = Date.now();
+  };
+  const markSettings = () => {
+    db.settingsUpdatedAt = Date.now();
+  };
+  // A random id for this phone: the phone that starts a night can always score it.
+  const DEVICE_ID = (() => {
+    try {
+      let id = localStorage.getItem(`${KEY}.device`);
+      if (!id) {
+        id = Math.random().toString(36).slice(2, 12);
+        localStorage.setItem(`${KEY}.device`, id);
+      }
+      return id;
+    } catch (_) {
+      return 'this-device';
+    }
+  })();
   // Ask the browser to keep our data (helps on iPhone / Safari).
   try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (_) { /* ignore */ }
 
   const S = () => db.settings;
   const P = (id) => db.players.find((p) => p.id === id) || { id, name: 'Unknown', emoji: '❔', hue: 0 };
   const nameOf = (id) => esc(P(id).name);
-  const activeNight = () => db.nights.find((n) => n.status === 'active');
+  /** The night being played: one started on this phone first, else the newest. */
+  const activeNight = () => {
+    const live = db.nights.filter((n) => n.status === 'active');
+    return live.find((n) => n.device === DEVICE_ID) || live.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+  };
   const nightById = (id) => db.nights.find((n) => n.id === id);
   const byNewest = (a, b) => b.date.localeCompare(a.date) || (b.startedAt || 0) - (a.startedAt || 0);
   const finishedNights = () => db.nights.filter((n) => n.status === 'finished' && n.rounds.length).sort(byNewest);
@@ -80,6 +117,7 @@
     const existing = db.players.find((p) => p.name.toLowerCase() === name.toLowerCase());
     if (existing) {
       existing.hidden = false;
+      touch(existing);
       save();
       return existing;
     }
@@ -92,6 +130,7 @@
       emoji: pool[Math.floor(Math.random() * pool.length)],
       hue: Math.floor(Math.random() * 360),
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
     db.players.push(p);
     save();
@@ -125,6 +164,7 @@
   const DATE_FMT = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const MONTH_FMT = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' });
   const DAYMON_FMT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+  const DATE_TIME_FMT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const DAYMONYEAR_FMT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   const toDate = (iso) => new Date(`${iso}T12:00:00`);
   const fmtDate = (iso) => DATE_FMT.format(toDate(iso));
@@ -287,6 +327,7 @@
         root.onkeydown = null;
         if (prevFocus && prevFocus.focus) try { prevFocus.focus({ preventScroll: true }); } catch (_) { /* ignore */ }
         resolve({ value, input });
+        if (renderPending) setTimeout(() => renderPending && render(), 60);
       };
       root.onclick = (e) => {
         const el = e.target.closest('[data-modal-value]');
@@ -345,6 +386,30 @@
     return r.value === 'ok' ? String(r.input || '').trim() : null;
   }
 
+  /** Ask how many points a late joiner starts with, showing the table so far. */
+  async function askStartPoints(night, p) {
+    const list = C.nightSummary(night).players;
+    const all = list.map((x) => x.pts);
+    const low = Math.min(...all);
+    const avg = Math.round(all.reduce((a, b) => a + b, 0) / all.length);
+    const lowNames = list.filter((x) => x.pts === low).map((x) => P(x.playerId).name).join(' & ');
+    const r = await ask({
+      title: `Starting points for ${esc(p.name)}`,
+      body: `<p>Points after ${plural(night.rounds.length, 'round')}:</p>
+        <div class="mini-table">${list.map((x) => `<div>${avatar(x.playerId, 'sm')}<span>${nameOf(x.playerId)}</span><b>${ptsTxt(x.pts)} pts</b></div>`).join('')}</div>
+        <p class="hint">${esc(p.name)} gets points from the next round on. How many to start with?</p>`,
+      buttons: [
+        { label: `Same as last place · ${ptsTxt(low)} pts <small>(${esc(lowNames)})</small>`, value: low, kind: 'primary' },
+        { label: `Table average · ${ptsTxt(avg)} pts`, value: avg, kind: 'secondary' },
+        { label: 'Start from 0', value: 0, kind: 'secondary' },
+        { label: 'Other number…', value: 'custom' },
+      ],
+    });
+    if (r.value === null || r.value === undefined) return null;
+    if (r.value === 'custom') return askNumber(`Starting points for ${p.name}`, '', 'pts');
+    return Number(r.value) || 0;
+  }
+
   /* ================= sharing ================= */
   async function shareText(text, title = 'CHAMPIONS') {
     if (navigator.share && isTouch()) {
@@ -375,7 +440,7 @@
     }
     L.push('', `Ranking (${plural(sum.rounds, 'round')}):`);
     for (const p of sum.players) {
-      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — ${ptsTxt(p.pts)} pts · won ${money(p.won)} · lost ${money(p.lost)} · fees ${money(p.fees)}`);
+      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — ${ptsTxt(p.pts)} pts${p.start ? ` (incl. ${ptsTxt(p.start)} start pts)` : ''} · won ${money(p.won)} · lost ${money(p.lost)} · fees ${money(p.fees)}`);
     }
     L.push('', `🍯 Pot: ${money(sum.potTotal)} · 🪑 Table: ${money(sum.tableTotal)}`);
     if (plan) {
@@ -386,6 +451,233 @@
     L.push('', 'Tonight overall (money − fees − bill):');
     for (const p of sum.players) L.push(`   ${P(p.playerId).name}: ${money(p.net - (billBy[p.playerId] || 0), true)}`);
     return L.join('\n');
+  }
+
+  /* ================= team sync ================= */
+  // The team's shared data lives in a secret GitHub gist. Every phone reads it
+  // (no limit, no login); phones with the team key also save to it.
+  const TEAM_DEFAULT = { owner: 'Yalame', id: '' };
+  const SYNC_KEY = `${KEY}.sync`;
+  function loadSync() {
+    let st = {};
+    try {
+      st = JSON.parse(localStorage.getItem(SYNC_KEY) || '{}') || {};
+    } catch (_) {
+      st = {};
+    }
+    if (!st.id && !st.disconnected && TEAM_DEFAULT.id) Object.assign(st, TEAM_DEFAULT);
+    return st;
+  }
+  let sync = loadSync();
+  function saveSync() {
+    try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (_) { /* ignore */ }
+  }
+  const syncOn = () => !!(sync.owner && sync.id);
+  const canWrite = () => syncOn() && !!sync.token;
+  /** Can this phone enter rounds for this night? */
+  const canScore = (night) => !syncOn() || canWrite() || night.device === DEVICE_ID;
+  let syncBusy = false;
+  let syncAgain = false;
+  let syncTimer = null;
+  let renderPending = false;
+
+  // GitHub addresses (sync.api / sync.raw can point elsewhere for testing only)
+  const API = () => sync.api || 'https://api.github.com';
+  const RAW = () => sync.raw || 'https://gist.githubusercontent.com';
+  const ghHeaders = (token) => ({
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  });
+  function syncError(status) {
+    if (status === 401) return 'The team key was not accepted — paste it again in Settings.';
+    if (status === 403 || status === 429) return 'GitHub is busy (too many requests) — trying again soon.';
+    if (status === 404) return 'Team data not found — check the team link in Settings.';
+    return `GitHub error ${status} — trying again soon.`;
+  }
+  function parseTeamText(text) {
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      throw new Error('The team data file is damaged.');
+    }
+  }
+  async function fetchTeamData() {
+    if (canWrite()) {
+      const r = await fetch(`${API()}/gists/${sync.id}`, { headers: ghHeaders(sync.token), cache: 'no-store' });
+      if (!r.ok) throw new Error(syncError(r.status));
+      const g = await r.json();
+      const f = g.files && g.files[Y.FILE];
+      if (!f) return null;
+      return parseTeamText(f.truncated ? await (await fetch(f.raw_url, { cache: 'no-store' })).text() : f.content);
+    }
+    const r = await fetch(`${RAW()}/${sync.owner}/${sync.id}/raw/${Y.FILE}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(syncError(r.status));
+    return parseTeamText(await r.text());
+  }
+  async function pushTeamData() {
+    const r = await fetch(`${API()}/gists/${sync.id}`, {
+      method: 'PATCH',
+      headers: { ...ghHeaders(sync.token), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: { [Y.FILE]: { content: JSON.stringify(Y.toPayload(db)) } } }),
+    });
+    if (r.status === 403 || r.status === 404) throw new Error('This team key can’t save the team data (wrong GitHub account?).');
+    if (!r.ok) throw new Error(syncError(r.status));
+    sync.lastPush = Date.now();
+  }
+  const uiBusy = () => $('#modal-root').childElementCount > 0;
+
+  /** Download the team data, merge it with this phone's, upload if this phone has news. */
+  async function syncNow(manual = false) {
+    if (!syncOn()) return;
+    if (syncBusy) {
+      syncAgain = true;
+      return;
+    }
+    if (uiBusy()) {
+      // never change data under an open dialog — try again in a moment
+      clearTimeout(syncTimer);
+      syncTimer = setTimeout(() => syncNow(manual), 3000);
+      return;
+    }
+    if (navigator.onLine === false) {
+      sync.error = 'Offline — will sync when back online.';
+      updateSyncChips();
+      return;
+    }
+    syncBusy = true;
+    sync.lastTry = Date.now();
+    updateSyncChips();
+    try {
+      const remote = await fetchTeamData();
+      if (uiBusy()) {
+        syncAgain = true;
+        return;
+      }
+      let local = db;
+      if (remote && !sync.adopted) local = Y.adoptRemoteIds(local, remote);
+      const merged = remote ? Y.mergeData(local, remote) : local;
+      if (Y.fingerprint(merged) !== Y.fingerprint(db) || merged !== db) {
+        const changed = Y.fingerprint(merged) !== Y.fingerprint(db);
+        db = merged;
+        saveLocal();
+        if (changed) softRender();
+      }
+      sync.adopted = true;
+      if (canWrite() && Y.fingerprint(db) !== Y.fingerprint(remote)) await pushTeamData();
+      sync.lastSync = Date.now();
+      sync.error = null;
+      if (manual) toast('☁️ Synced with the team');
+    } catch (e) {
+      sync.error = (e && e.message && !/fetch|network|load failed/i.test(e.message)) ? e.message : 'No connection to GitHub — trying again soon.';
+      if (manual) toast(`⚠️ ${sync.error}`, 3500);
+    } finally {
+      syncBusy = false;
+      saveSync();
+      updateSyncChips();
+      if (syncAgain) {
+        syncAgain = false;
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(() => syncNow(), 1500);
+      }
+    }
+  }
+  function scheduleSync() {
+    if (!canWrite()) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => syncNow(), 1200);
+  }
+  /** Redraw after new team data arrived — but not while someone is typing or a dialog is open. */
+  function softRender() {
+    const el = document.activeElement;
+    const typing = el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && el.type !== 'checkbox';
+    if (uiBusy() || typing) {
+      renderPending = true;
+      return;
+    }
+    render();
+  }
+  function startSync() {
+    if (syncOn()) syncNow();
+    setInterval(() => {
+      if (!syncOn() || syncBusy || document.visibilityState !== 'visible') return;
+      const gap = activeNight() ? 15000 : 60000; // faster while a game is on
+      if (Date.now() - (sync.lastTry || 0) >= gap) syncNow();
+    }, 5000);
+    setInterval(updateSyncChips, 30000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') syncNow();
+    });
+    window.addEventListener('online', () => syncNow());
+    document.addEventListener('focusout', () => setTimeout(() => {
+      if (renderPending) softRender();
+    }, 150));
+  }
+  function agoTxt(t) {
+    const sec = Math.round((Date.now() - t) / 1000);
+    if (sec < 45) return 'just now';
+    const min = Math.round(sec / 60);
+    return min < 60 ? `${min} min ago` : DATE_TIME_FMT.format(new Date(t));
+  }
+  function syncChip() {
+    if (!syncOn()) return '';
+    let text;
+    let kind = '';
+    if (sync.error) {
+      kind = 'err';
+      text = '⚠️ Sync problem';
+    } else if (!sync.lastSync) text = '☁️ Connecting to the team…';
+    else text = `☁️ ${canWrite() ? 'Team sync' : 'View only'} · ${agoTxt(sync.lastSync)}`;
+    return `<button class="sync-chip ${kind}" data-action="syncTap">${text}</button>`;
+  }
+  const syncBar = () => (syncOn() ? `<div class="sync-bar"><span class="sync-slot">${syncChip()}</span></div>` : '');
+  function updateSyncChips() {
+    document.querySelectorAll('.sync-slot').forEach((el) => {
+      el.innerHTML = syncChip();
+    });
+  }
+
+  function syncCard() {
+    if (!syncOn()) {
+      return `
+      <section class="card" id="sync-card">
+        <h3>☁️ Team sync</h3>
+        <p class="hint" style="margin:0 0 10px">Share one history between all your phones. Paste the team link (a GitHub gist address).</p>
+        <div class="add-row">
+          <input class="text-in" id="team-link" placeholder="https://gist.github.com/…" autocomplete="off" autocapitalize="off" spellcheck="false" data-enter="connectTeam" aria-label="Team link">
+          <button class="secondary" data-action="connectTeam">Connect</button>
+        </div>
+      </section>`;
+    }
+    const link = `https://gist.github.com/${encodeURIComponent(sync.owner)}/${encodeURIComponent(sync.id)}`;
+    return `
+      <section class="card" id="sync-card">
+        <div class="card-head"><h3>☁️ Team sync</h3><span class="sync-slot">${syncChip()}</span></div>
+        <ul class="calc-lines">
+          <li><span>Team data</span><b><a href="${link}" target="_blank" rel="noopener">${esc(sync.owner)}/${esc(sync.id.slice(0, 7))}…</a></b></li>
+          <li><span>This phone</span><b>${canWrite() ? '✅ saves to the team' : '👀 view only'}</b></li>
+          <li><span>Last synced</span><b>${sync.lastSync ? DATE_TIME_FMT.format(new Date(sync.lastSync)) : 'not yet'}</b></li>
+        </ul>
+        ${sync.error ? `<p class="hint warn">⚠️ ${esc(sync.error)}</p>` : ''}
+        ${canWrite()
+          ? `<div class="btn-row"><button class="secondary" data-action="syncManual">🔄 Sync now</button><button class="ghost" data-action="removeKey">Remove key</button></div>`
+          : `<p class="hint" style="margin:12px 0 8px">To enter games from this phone, paste the <b>team key</b> (ask ${esc(sync.owner)}). Without it, this phone follows the team's games live.</p>
+          <div class="add-row">
+            <input class="text-in" type="password" id="team-key" placeholder="Team key" autocomplete="off" autocapitalize="off" spellcheck="false" data-enter="saveKey" aria-label="Team key">
+            <button class="secondary" data-action="saveKey">Save</button>
+          </div>
+          <button class="link" data-action="syncManual" style="margin-top:8px">🔄 Sync now</button>`}
+        <details style="margin-top:12px"><summary class="muted">How does ${esc(sync.owner)} make a team key?</summary>
+          <ol class="rules">
+            <li>Open <a href="https://github.com/settings/tokens/new?description=CHAMPIONS%20team%20key&amp;scopes=gist" target="_blank" rel="noopener">this GitHub page</a> while signed in as ${esc(sync.owner)}.</li>
+            <li>Leave only <b>gist</b> ticked, pick an expiry, tap <b>Generate token</b>.</li>
+            <li>Paste it here, and send it privately to the other scorekeepers.</li>
+          </ol>
+          <p class="hint">A gist-only key can change ${esc(sync.owner)}'s gists — not the app or any repository.</p>
+        </details>
+        <button class="link" data-action="disconnectTeam" style="margin-top:6px;color:var(--ink-3)">Disconnect this phone</button>
+      </section>`;
   }
 
   /* ================= rendering ================= */
@@ -405,6 +697,7 @@
   }
 
   function render(opts = {}) {
+    renderPending = false;
     keepDraft();
     const app = $('#app');
     let html = '';
@@ -440,7 +733,7 @@
   /* ---------- PLAY tab ---------- */
   function renderPlay() {
     const night = activeNight();
-    if (night) return ui.view === 'bill' ? renderBill(night) : renderGame(night);
+    if (night) return ui.view === 'bill' && canScore(night) ? renderBill(night) : renderGame(night);
     if (ui.view === 'setup' && ui.setup) return renderSetup();
     if (ui.view === 'report' && ui.reportId && nightById(ui.reportId)) return renderReport(nightById(ui.reportId), true);
     return renderHome();
@@ -457,6 +750,7 @@
     const installHint = !isStandalone() && isIOS();
     return `
       ${logo()}
+      ${syncBar()}
       <button class="cta" data-action="newNight">
         <span class="cta-icon">🃏</span>
         <span><b>Start tonight</b><small>Pick the players and deal the first round</small></span>
@@ -569,7 +863,58 @@
     return { d, s, full, active, remaining, complete, order, amounts, preview };
   }
 
+  function renderWatch(night) {
+    const sum = C.nightSummary(night);
+    return `
+      ${syncBar()}
+      <div class="game-top">
+        <div><span class="eyebrow"><span class="live-dot"></span>Live · ${fmtDate(night.date)}</span><h2>Round ${night.rounds.length + 1}</h2></div>
+        <div class="pills"><span class="pill">🍯 Pot ${moneyHtml(sum.potTotal)}</span><span class="pill">🪑 Table ${moneyHtml(sum.tableTotal)}</span></div>
+      </div>
+      <section class="card notice"><span class="ico">👀</span><div><b>Following the team's game live</b><p>New rounds appear by themselves. To enter rounds on this phone, add the team key in Settings.</p></div></section>
+      ${scoreboard(night, sum)}
+      ${roundsCard(night, false)}`;
+  }
+
+  function scoreboard(night, sum) {
+    return `
+      <section class="card">
+        <div class="card-head"><h3>Tonight's table</h3><span class="muted">${plural(night.rounds.length, 'round')}</span></div>
+        <div class="board">${sum.players.map((p) => `
+          <div class="board-row">
+            <span class="rk ${night.rounds.length && p.rank <= 3 ? 'medal' : ''}">${night.rounds.length ? medal(p.rank) : '·'}</span>
+            ${avatar(p.playerId)}
+            <span class="nm"><span class="name">${nameOf(p.playerId)}${sum.champions.includes(p.playerId) ? ' 👑' : ''}</span>
+              <small>${p.start ? `${ptsTxt(p.start)} start pts · ` : ''}${plural(p.roundsWon, 'win')} · money <span class="${cls(p.net)}">${moneyHtml(p.net, true)}</span> after fees</small></span>
+            <span class="score">${ptsTxt(p.pts)}<small>pts</small></span>
+          </div>`).join('')}</div>
+      </section>`;
+  }
+
+  /** Rounds and late joins in order (newest first while playing). */
+  function roundsCard(night, editable) {
+    const items = night.rounds.map((r, i) => ({ key: i + 1, html: roundRow(r, i, editable) }));
+    for (const j of night.joins || []) items.push({ key: (j.afterRound || 0) + 0.5, html: joinRow(j, editable) });
+    if (!items.length) return '';
+    items.sort((a, b) => a.key - b.key);
+    if (editable) items.reverse();
+    return `
+      <section class="card">
+        <h3>Rounds</h3>
+        ${items.map((x) => x.html).join('')}
+      </section>`;
+  }
+  function joinRow(j, editable) {
+    return `<div class="round-row join-row">
+      <div class="round-no">＋<small>joined</small></div>
+      <div class="round-main"><b>${avatar(j.playerId, 'sm')} ${nameOf(j.playerId)} joined after round ${j.afterRound}</b>
+        <small>started with ${ptsTxt(j.pts)} pts</small></div>
+      ${editable ? `<button class="icon-btn" data-action="editJoin" data-id="${j.id}" aria-label="Change starting points of ${nameOf(j.playerId)}">✎</button>` : ''}
+    </div>`;
+  }
+
   function renderGame(night) {
+    if (!canScore(night)) return renderWatch(night);
     const rs = roundState(night);
     const { d, s, full, active, remaining, complete, preview } = rs;
     const sum = C.nightSummary(night);
@@ -623,6 +968,7 @@
     }
 
     return `
+      ${syncBar()}
       <div class="game-top">
         <div><span class="eyebrow">Tonight · ${fmtDate(night.date)}</span><h2>Round ${roundNo}</h2></div>
         <div class="pills"><span class="pill">🍯 Pot ${moneyHtml(sum.potTotal)}</span><span class="pill">🪑 Table ${moneyHtml(sum.tableTotal)}</span></div>
@@ -654,23 +1000,9 @@
         <button class="primary" data-action="saveRound" ${complete ? '' : 'disabled'}>Save round ${roundNo} ✓</button>
       </div>
 
-      <section class="card">
-        <div class="card-head"><h3>Tonight's table</h3><span class="muted">${plural(night.rounds.length, 'round')}</span></div>
-        <div class="board">${sum.players.map((p) => `
-          <div class="board-row">
-            <span class="rk ${night.rounds.length && p.rank <= 3 ? 'medal' : ''}">${night.rounds.length ? medal(p.rank) : '·'}</span>
-            ${avatar(p.playerId)}
-            <span class="nm"><span class="name">${nameOf(p.playerId)}${sum.champions.includes(p.playerId) ? ' 👑' : ''}</span>
-              <small>${plural(p.roundsWon, 'win')} · money <span class="${cls(p.net)}">${moneyHtml(p.net, true)}</span> after fees</small></span>
-            <span class="score">${ptsTxt(p.pts)}<small>pts</small></span>
-          </div>`).join('')}</div>
-      </section>
+      ${scoreboard(night, sum)}
 
-      ${night.rounds.length ? `
-      <section class="card">
-        <h3>Rounds</h3>
-        ${night.rounds.map((r, i) => roundRow(r, i, true)).reverse().join('')}
-      </section>` : ''}
+      ${roundsCard(night, true)}
 
       <div class="btn-row">
         <button class="secondary" data-action="addLate">＋ Player joins</button>
@@ -775,7 +1107,7 @@
           const total = C.r2(p.net - bill);
           return `<div class="res ${champs.includes(p.playerId) ? 'is-champ' : ''}">
             <div class="res-head"><span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>${avatar(p.playerId)}
-              <span class="nm"><span class="name">${nameOf(p.playerId)}${champs.includes(p.playerId) ? ' 👑' : ''}</span><small>${plural(p.roundsWon, 'round')} won of ${p.roundsPlayed}</small></span>
+              <span class="nm"><span class="name">${nameOf(p.playerId)}${champs.includes(p.playerId) ? ' 👑' : ''}</span><small>${plural(p.roundsWon, 'round')} won of ${p.roundsPlayed}${p.start ? ` · joined late with ${ptsTxt(p.start)} pts` : ''}</small></span>
               <span class="res-pts">${ptsTxt(p.pts)}<small>pts</small></span></div>
             <div class="res-grid">
               <div><small>Won</small><b class="${p.won ? 'pos' : 'zero'}">${moneyHtml(p.won, true)}</b></div>
@@ -790,7 +1122,7 @@
 
       <details class="card">
         <summary>All ${plural(night.rounds.length, 'round')}</summary>
-        ${night.rounds.map((r, i) => roundRow(r, i, false)).join('')}
+        ${roundsCard(night, false).replace(/<section class="card">\s*<h3>Rounds<\/h3>|<\/section>\s*$/g, '')}
       </details>
 
       <div class="stack">
@@ -891,6 +1223,7 @@
     }).join('');
     return `
       <h2 class="page-title">📅 History</h2>
+      ${syncBar()}
       <p class="page-sub">Every night, its champion and the full report.</p>
       ${live ? `<button class="night" data-action="tab" data-tab="play">
         <span class="night-date"><b>${toDate(live.date).getDate()}</b><small>NOW</small></span>
@@ -957,6 +1290,7 @@
           <li><b>Money</b>: only the winner collects. Each player pays the winner what they played, but never more than the winner played.</li>
           <li>The winner pays <b>${moneyHtml(s.tableFee)}</b> for the table, plus <b>${moneyHtml(s.potFeeAt)}</b> to the pot if they played ${moneyHtml(s.potThreshold)}, or <b>${moneyHtml(s.potFeeAbove)}</b> if they played more${s.potFeeBelow ? `, or ${moneyHtml(s.potFeeBelow)} if less` : ''}.</li>
           <li>At the end, the pot is taken off the bill. The rest is paid by the lowest places (e.g. 4 players: 50 · 30 · 20 %). Ties share equally.</li>
+          <li>Someone <b>joining late</b> can get starting points: last place's points, the table average, 0 or any number.</li>
           <li>The <b>champion</b> of the night is whoever has the most points.</li>
         </ol>
       </section>
@@ -990,6 +1324,8 @@
         <div class="field"><label>Sounds</label><span class="switch"><input type="checkbox" data-change="setBool" data-key="sound" ${s.sound ? 'checked' : ''} aria-label="Sounds"><span></span></span></div>
         <div class="field"><label for="f-currency">Currency symbol</label><input id="f-currency" value="${esc(s.currency)}" maxlength="3" data-change="setText" data-key="currency"></div>
       </section>
+
+      ${syncCard()}
 
       <section class="card">
         <h3>Backup &amp; history</h3>
@@ -1085,13 +1421,16 @@
         status: 'active',
         playerIds: st.selected.slice(),
         rounds: [],
+        joins: [],
+        device: DEVICE_ID,
+        updatedAt: Date.now(),
       };
       db.nights.push(night);
       save();
       ui.draft = null;
       sfx.win();
       go({ view: 'game', setup: null });
-      toast('Good luck everyone! 🍀');
+      toast(syncOn() && !canWrite() ? 'Good luck! This phone has no team key, so tonight stays on this phone only.' : 'Good luck everyone! 🍀', syncOn() && !canWrite() ? 4500 : 2200);
     },
 
     /* --- rounds --- */
@@ -1153,6 +1492,7 @@
       }
       const round = { id: uid(), at: Date.now(), ...C.buildRound(rs.d.points, rs.order, rs.amounts, rs.s) };
       night.rounds.push(round);
+      touch(night);
       save();
       const w = round.results[0];
       const keepOut = { ...rs.d.out };
@@ -1185,7 +1525,11 @@
       if (idx < 0) return;
       const r = night.rounds[idx];
       if (!(await confirmBox(`Delete round ${idx + 1}?`, `🥇 ${nameOf(r.results[0].playerId)} +${ptsTxt(r.results[0].pts)} pts · ${moneyHtml(r.results[0].won)}<br>Its points, money and fees will be removed.`, 'Delete round'))) return;
-      night.rounds.splice(idx, 1);
+      const live = activeNight();
+      if (!live) return;
+      live.rounds = live.rounds.filter((x) => x.id !== ds.id);
+      tomb('rounds', ds.id);
+      touch(live);
       save();
       render();
       toast('Round deleted');
@@ -1203,10 +1547,38 @@
       if (r.value && String(r.value).startsWith('id:')) p = P(String(r.value).slice(3));
       else if (r.value === 'new') p = addPlayer(r.input);
       if (!p || !p.name || night.playerIds.includes(p.id)) return;
-      night.playerIds.push(p.id);
+      let start = 0;
+      if (night.rounds.length) {
+        const pick = await askStartPoints(night, p);
+        if (pick == null) return;
+        start = pick;
+      }
+      const live = activeNight();
+      if (!live || live.playerIds.includes(p.id)) return;
+      live.playerIds.push(p.id);
+      if (live.rounds.length) {
+        live.joins = live.joins || [];
+        live.joins.push({ id: uid(), playerId: p.id, pts: start, afterRound: live.rounds.length, at: Date.now(), updatedAt: Date.now() });
+      }
+      touch(live);
       save();
       render();
-      toast(`${p.name} joined the table 🃏`);
+      toast(`${p.name} joined${start ? ` with ${ptsTxt(start)} pts` : ''} 🃏`);
+    },
+    editJoin: async (ds) => {
+      const n0 = activeNight();
+      const j0 = n0 && (n0.joins || []).find((x) => x.id === ds.id);
+      if (!j0) return;
+      const v = await askNumber(`Starting points for ${P(j0.playerId).name}`, j0.pts, 'pts', 'Set 0 to remove the head start.');
+      if (v == null) return;
+      const night = activeNight();
+      const j = night && (night.joins || []).find((x) => x.id === ds.id);
+      if (!j) return;
+      j.pts = v;
+      touch(j);
+      touch(night);
+      save();
+      render();
     },
     finishNight: async () => {
       const night = activeNight();
@@ -1214,6 +1586,7 @@
       if (!night.rounds.length) {
         if (await confirmBox('No rounds played', 'Cancel tonight’s game? Nothing will be saved.', 'Cancel the night')) {
           db.nights = db.nights.filter((n) => n.id !== night.id);
+          tomb('nights', night.id);
           save();
           ui.draft = null;
           go({ view: 'home' });
@@ -1238,6 +1611,7 @@
       night.bill = { invoice: C.r2(invoice), shares: C.sharesFor(night.playerIds.length, S()), tableToInvoice: ui.billTable };
       night.status = 'finished';
       night.endedAt = Date.now();
+      touch(night);
       save();
       ui.draft = null;
       go({ view: 'report', reportId: night.id });
@@ -1253,9 +1627,13 @@
       if (activeNight()) return toast('Finish the current night first');
       const night = nightById(ds.id);
       if (!(await confirmBox('Reopen this night?', 'You can add or delete rounds, then finish it again with the bill.', 'Reopen', 'primary'))) return;
-      night.status = 'active';
-      delete night.bill;
-      delete night.endedAt;
+      const again = nightById(ds.id);
+      if (!again || activeNight()) return;
+      again.status = 'active';
+      again.device = DEVICE_ID;
+      delete again.bill;
+      delete again.endedAt;
+      touch(again);
       save();
       ui.draft = null;
       go({ tab: 'play', view: 'game', historyId: null, reportId: null });
@@ -1265,6 +1643,7 @@
       if (!night) return;
       if (!(await confirmBox('Delete this night?', `${fmtDate(night.date)} — ${plural(night.rounds.length, 'round')}.<br>This removes it from all rankings and can’t be undone.`, 'Delete for good'))) return;
       db.nights = db.nights.filter((n) => n.id !== night.id);
+      tomb('nights', night.id);
       save();
       go({ historyId: null, reportId: null, view: 'home' });
       toast('Night deleted');
@@ -1304,7 +1683,10 @@
       const name = await askText('Rename player', p.name);
       if (!name) return;
       if (db.players.some((x) => x.id !== p.id && x.name.toLowerCase() === name.toLowerCase())) return toast('That name is already taken');
-      p.name = name.slice(0, 24);
+      const again = db.players.find((x) => x.id === ds.id);
+      if (!again) return;
+      again.name = name.slice(0, 24);
+      touch(again);
       save();
       render();
     },
@@ -1313,6 +1695,7 @@
       const i = EMOJIS.indexOf(p.emoji);
       p.emoji = EMOJIS[(i + 1) % EMOJIS.length];
       if (Math.random() < 0.5) p.hue = (p.hue + 47) % 360;
+      touch(p);
       save();
       sfx.tap();
       render();
@@ -1321,6 +1704,7 @@
       const p = P(ds.id);
       p.hidden = !p.hidden;
       if (p.hidden) ui.showHidden = false;
+      touch(p);
       save();
       render();
       toast(p.hidden ? `${p.name} hidden from the player list (history kept)` : `${p.name} is back`);
@@ -1330,6 +1714,7 @@
       if (db.nights.some((n) => n.playerIds.includes(p.id))) return toast('Players with history can only be hidden');
       if (!(await confirmBox(`Delete ${esc(p.name)}?`, '', 'Delete'))) return;
       db.players = db.players.filter((x) => x.id !== p.id);
+      tomb('players', p.id);
       save();
       render();
     },
@@ -1342,9 +1727,59 @@
       render();
     },
     exportData: () => exportData(),
+    syncTap: () => {
+      go({ tab: 'settings' });
+      setTimeout(() => {
+        const c = $('#sync-card');
+        if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+      syncNow(true);
+    },
+    syncManual: () => syncNow(true),
+    connectTeam: () => {
+      const t = Y.parseTeamLink(($('#team-link') || {}).value);
+      if (!t) return toast('Paste the gist link, like https://gist.github.com/name/1234…', 3500);
+      sync = { owner: t.owner, id: t.id };
+      saveSync();
+      render();
+      syncNow(true);
+    },
+    saveKey: async () => {
+      const el = $('#team-key');
+      const key = el ? el.value.trim() : '';
+      if (!key) return toast('Paste the team key first');
+      try {
+        const r = await fetch(`${API()}/user`, { headers: ghHeaders(key), cache: 'no-store' });
+        if (r.status === 401) return toast('GitHub did not accept that key', 3000);
+        if (!r.ok) return toast(syncError(r.status), 3000);
+        const u = await r.json();
+        if (String(u.login).toLowerCase() !== String(sync.owner).toLowerCase()) {
+          return toast(`That key belongs to ${u.login}, but the team data belongs to ${sync.owner}`, 4500);
+        }
+      } catch (_) {
+        return toast('No internet — try again', 3000);
+      }
+      sync.token = key;
+      sync.error = null;
+      saveSync();
+      render();
+      syncNow(true);
+    },
+    removeKey: async () => {
+      if (!(await confirmBox('Remove the team key?', 'This phone becomes view-only.', 'Remove key'))) return;
+      delete sync.token;
+      saveSync();
+      render();
+    },
+    disconnectTeam: async () => {
+      if (!(await confirmBox('Disconnect this phone?', 'This phone stops syncing. Everything already on it stays here.', 'Disconnect'))) return;
+      sync = { disconnected: true };
+      saveSync();
+      render();
+    },
     pickImport: () => $('#import-file').click(),
     resetAll: async () => {
-      if (!(await confirmBox('Erase everything?', 'All players, nights and settings on this device will be deleted. Save a backup first if you might need them.', 'Erase everything'))) return;
+      if (!(await confirmBox('Erase everything?', syncOn() ? 'This erases this phone’s copy only — the team data comes back at the next sync. To leave the team, use “Disconnect this phone” first.' : 'All players, nights and settings on this device will be deleted. Save a backup first if you might need them.', 'Erase everything'))) return;
       if (!(await confirmBox('Really sure?', 'This cannot be undone.', 'Yes, erase it all'))) return;
       db = freshDb();
       save();
@@ -1379,6 +1814,7 @@
         return toast('Please type a number');
       }
       S()[el.dataset.key] = C.r2(v);
+      markSettings();
       save();
       toast('Saved ✓', 1200);
     },
@@ -1390,6 +1826,7 @@
       }
       S()[el.dataset.key] = list.slice(0, 8);
       el.value = S()[el.dataset.key].join(', ');
+      markSettings();
       save();
       toast('Saved ✓', 1200);
     },
@@ -1397,6 +1834,7 @@
       const n = Number(el.dataset.n);
       const list = parseList(el.value).slice(0, n);
       S().splits[n] = list.length ? list : [100];
+      markSettings();
       save();
       const total = S().splits[n].reduce((a, b) => a + b, 0);
       el.value = S().splits[n].join(', ');
@@ -1409,6 +1847,7 @@
     },
     setBool: (el) => {
       S()[el.dataset.key] = el.checked;
+      if (Y.SHARED_SETTINGS.includes(el.dataset.key)) markSettings();
       save();
       if (el.dataset.key === 'sound' && el.checked) sfx.chip();
     },
@@ -1416,6 +1855,7 @@
       const v = el.value.trim();
       if (!v) return;
       S()[el.dataset.key] = v.slice(0, 3);
+      markSettings();
       save();
       render();
     },
@@ -1472,7 +1912,9 @@
         title: 'Load backup?',
         body: `<p>Backup from <b>${esc(when)}</b>: ${plural(data.players.length, 'player')}, ${plural(data.nights.length, 'night')}.</p>
           <p><b>Merge</b> adds missing players and nights to what is here.<br><b>Replace</b> swaps everything for the backup.</p>`,
-        buttons: [{ label: 'Merge', value: 'merge', kind: 'primary' }, { label: 'Replace everything', value: 'replace', kind: 'danger' }, { label: 'Cancel', value: null }],
+        buttons: syncOn()
+          ? [{ label: 'Merge into the team', value: 'merge', kind: 'primary' }, { label: 'Cancel', value: null }]
+          : [{ label: 'Merge', value: 'merge', kind: 'primary' }, { label: 'Replace everything', value: 'replace', kind: 'danger' }, { label: 'Cancel', value: null }],
       });
       if (r.value === 'replace') {
         db = normalize(data);
@@ -1493,6 +1935,7 @@
           if (db.nights.some((x) => x.id === n.id)) continue;
           if (n.status === 'active' && activeNight()) continue;
           n.playerIds = n.playerIds.map(remap);
+          n.updatedAt = Date.now();
           for (const rd of n.rounds) {
             rd.order = (rd.order || []).map(remap);
             for (const res of rd.results) res.playerId = remap(res.playerId);
@@ -1553,6 +1996,7 @@
   restoreDraft();
   if (activeNight()) ui.view = 'game';
   render({ animate: true });
+  startSync();
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => { /* offline support is optional */ }));

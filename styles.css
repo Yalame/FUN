@@ -700,6 +700,36 @@ details.card[open] summary { margin-bottom: 8px; }
 .rules li { margin: 6px 0; }
 .rules b { color: var(--ink); }
 
+/* ---------- team sync ---------- */
+.sync-bar { display: flex; justify-content: center; margin: 2px 0 8px; }
+.sync-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 99px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
+}
+.sync-chip.err { color: #ffd38a; border-color: rgba(255, 211, 138, 0.45); }
+#sync-card a { color: var(--gold); text-decoration: none; }
+#sync-card details summary { cursor: pointer; }
+.hint.warn { color: #ffd38a; }
+
+/* late joiners */
+.mini-table { display: grid; gap: 6px; margin: 10px 0; text-align: left; }
+.mini-table div { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 12px; background: var(--panel-2); }
+.mini-table span:not(.av) { flex: 1; color: var(--ink); font-weight: 600; }
+.mini-table b { color: var(--gold-hi); font-variant-numeric: tabular-nums; }
+.modal .secondary { min-height: 48px; }
+.modal-btns small { font-weight: 600; opacity: 0.7; }
+.join-row .round-no { font-size: 24px; line-height: 1; }
+.join-row .round-main b { display: flex; align-items: center; gap: 6px; }
+
 /* ---------- tab bar ---------- */
 .tabbar {
   position: fixed;
