@@ -38,19 +38,23 @@ All numbers above can be changed in **Settings**.
 | `sw.js`, `manifest.webmanifest`, `icons/` | install on home screen + offline |
 | `Start CHAMPIONS.command` | double-click to open it on this Mac |
 
-## Team sync (all phones see the same history)
+## Team password and sync
 
-The team's data lives in one secret GitHub gist (`champions-data.json` in Yalame's account).
+Nothing of the team is shown without the **team password**. The app address is public,
+but it only shows a password screen.
 
-- **Every phone** with the app downloads it by itself: when the app opens, every 15 s during a game,
-  every minute otherwise. Phones without the team key follow the night live, read-only.
-- **Scorekeeper phones** paste the **team key** once (Settings → Team sync) and upload every change.
-  Make the key at <https://github.com/settings/tokens/new?description=CHAMPIONS%20team%20key&scopes=gist>
-  (only *gist* ticked) and share it privately.
-- Two scorekeepers at once is fine: rounds from both phones are kept, the newest edit wins,
-  deletes stay deleted (`sync.js`, tested in `tests/sync.test.js`).
-- Look & sound settings stay personal to each phone; money rules are shared.
-- Test locally without GitHub: `python3 tests/mock_gist_server.py 8790` (see the file for how).
+- All team data (players, nights, money) is encrypted on the phone with the password
+  (PBKDF2 + AES-GCM, see `sync.js`) and stored as unreadable text in one secret GitHub gist.
+- **First setup (once, by the owner):** open the app, choose the password, paste a GitHub key
+  with only the *gist* permission (<https://github.com/settings/tokens/new?description=CHAMPIONS%20team%20key&scopes=gist>).
+- **Every other phone:** open the app, type the password once. The GitHub key travels inside the
+  encrypted data, so nobody else has to handle it.
+- Phones sync by themselves: every 15 s during a game, every minute otherwise.
+  Rounds from all phones are kept, the newest edit wins, deletes stay deleted.
+- Settings → Team: change the password (all other phones are asked again), replace the GitHub key,
+  or sign a phone out (removes the team data from it).
+- The password cannot be recovered. A phone that is still signed in can set a new one.
+- Test locally without GitHub: `python3 tests/mock_gist_server.py 8790`.
 
 ## Where the history lives
 

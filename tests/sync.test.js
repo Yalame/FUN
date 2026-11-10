@@ -115,4 +115,32 @@ test('team link is read from a gist address', () => {
   assert.strictEqual(Y.parseTeamLink('hello'), null);
 });
 
-console.log(`\n${passed} tests passed${process.exitCode ? ' — SOME FAILED' : ''}`);
+async function cryptoTests() {
+  console.log('Password lock');
+  const atest = async (name, fn) => {
+    try { await fn(); passed++; console.log('  ✓ ' + name); } catch (e) { console.error('  ✗ ' + name + '\n    ' + e.message); process.exitCode = 1; }
+  };
+  const salt = Y.newSalt();
+  const key = await Y.deriveKey('correct horse battery staple', salt, 1000);
+  const content = { payload: { players: [{ id: 'p1', name: 'Réza 🦁' }], nights: [] }, token: 'ghp_secret' };
+  const file = await Y.seal(key, salt, content, 1000);
+  await atest('the right password opens the file', async () => {
+    const again = await Y.deriveKey('correct horse battery staple', file.salt, file.iter);
+    assert.deepStrictEqual(await Y.unseal(again, file), content);
+  });
+  await atest('a wrong password does not', async () => {
+    const bad = await Y.deriveKey('correct horse battery stapl', file.salt, file.iter);
+    await assert.rejects(Y.unseal(bad, file));
+  });
+  await atest('nothing readable is left in the stored file', async () => {
+    const text = JSON.stringify(file);
+    assert.ok(!text.includes('ghp_secret') && !text.includes('za') && !text.includes('players'));
+  });
+  await atest('a changed file is rejected', async () => {
+    const broken = { ...file, data: file.data.slice(0, -6) + 'AAAA==' };
+    await assert.rejects(Y.unseal(key, broken));
+  });
+}
+
+cryptoTests().then(() => console.log(`\n${passed} tests passed${process.exitCode ? ' — SOME FAILED' : ''}`));
+if (false) console.log(`\n${passed} tests passed${process.exitCode ? ' — SOME FAILED' : ''}`);

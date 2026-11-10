@@ -163,7 +163,48 @@
     return m ? { owner: m[1], id: m[2].toLowerCase() } : null;
   }
 
-  const SyncLib = { FILE, SHARED_SETTINGS, emptyDeleted, mergeData, adoptRemoteIds, toPayload, fingerprint, parseTeamLink };
+  /* ---------- password lock (encryption) ----------
+     The team password is turned into a key (PBKDF2), and the team data is
+     encrypted with it (AES-GCM) before it leaves a phone. */
+  const ITERATIONS = 600000;
+  const subtle = () => (typeof crypto !== 'undefined' ? crypto : globalThis.crypto).subtle;
+  const rand = (n) => (typeof crypto !== 'undefined' ? crypto : globalThis.crypto).getRandomValues(new Uint8Array(n));
+  function toB64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  function fromB64(text) {
+    const bin = atob(text);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  const newSalt = () => toB64(rand(16));
+
+  /** Password + salt → key (as text, to remember on this phone). */
+  async function deriveKey(password, salt, iter) {
+    const base = await subtle().importKey('raw', new TextEncoder().encode(String(password)), 'PBKDF2', false, ['deriveBits']);
+    const bits = await subtle().deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(salt), iterations: iter || ITERATIONS }, base, 256);
+    return toB64(new Uint8Array(bits));
+  }
+  const aesKey = (key) => subtle().importKey('raw', fromB64(key), 'AES-GCM', false, ['encrypt', 'decrypt']);
+
+  /** Encrypt content into the file that is stored on GitHub. */
+  async function seal(key, salt, content, iter) {
+    const iv = rand(12);
+    const data = await subtle().encrypt({ name: 'AES-GCM', iv }, await aesKey(key), new TextEncoder().encode(JSON.stringify(content)));
+    return { app: 'CHAMPIONS', enc: 1, iter: iter || ITERATIONS, salt, iv: toB64(iv), data: toB64(new Uint8Array(data)) };
+  }
+  /** Decrypt the stored file. Throws when the password (key) is wrong. */
+  async function unseal(key, file) {
+    const plain = await subtle().decrypt({ name: 'AES-GCM', iv: fromB64(file.iv) }, await aesKey(key), fromB64(file.data));
+    return JSON.parse(new TextDecoder().decode(plain));
+  }
+
+  const SyncLib = {
+    ITERATIONS, newSalt, deriveKey, seal, unseal,
+    FILE, SHARED_SETTINGS, emptyDeleted, mergeData, adoptRemoteIds, toPayload, fingerprint, parseTeamLink };
   if (typeof module !== 'undefined' && module.exports) module.exports = SyncLib;
   else root.SyncLib = SyncLib;
 })(typeof self !== 'undefined' ? self : this);

@@ -456,7 +456,7 @@
   /* ================= team sync ================= */
   // The team's shared data lives in a secret GitHub gist. Every phone reads it
   // (no limit, no login); phones with the team key also save to it.
-  const TEAM_DEFAULT = { owner: 'Yalame', id: '29efc50d95647d63b6fbf1dc2eb87b2a' };
+  const TEAM_DEFAULT = { owner: 'Yalame', id: '85907d46e3e37bebdc6a07780090f9b4' };
   const SYNC_KEY = `${KEY}.sync`;
   function loadSync() {
     let st = {};
@@ -465,14 +465,16 @@
     } catch (_) {
       st = {};
     }
-    if (!st.id && !st.disconnected && TEAM_DEFAULT.id) Object.assign(st, TEAM_DEFAULT);
+    // always the team's file (st.api is set only by local tests)
+    if (!st.api) Object.assign(st, TEAM_DEFAULT);
     return st;
   }
   let sync = loadSync();
   function saveSync() {
     try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (_) { /* ignore */ }
   }
-  const syncOn = () => !!(sync.owner && sync.id);
+  /** Unlocked = this phone knows the team password (its key). */
+  const syncOn = () => !!sync.key;
   const canWrite = () => syncOn() && !!sync.token;
   /** Can this phone enter rounds for this night? */
   const canScore = (night) => !syncOn() || canWrite() || night.device === DEVICE_ID;
@@ -503,28 +505,109 @@
       throw new Error('The team data file is damaged.');
     }
   }
-  async function fetchTeamData() {
-    if (canWrite()) {
+  class LockedOut extends Error {}
+  /** The stored team file as it is on GitHub (still encrypted). */
+  async function fetchTeamFile() {
+    let text;
+    if (sync.key && sync.token) {
       const r = await fetch(`${API()}/gists/${sync.id}`, { headers: ghHeaders(sync.token), cache: 'no-store' });
       if (!r.ok) throw new Error(syncError(r.status));
       const g = await r.json();
       const f = g.files && g.files[Y.FILE];
-      if (!f) return null;
-      return parseTeamText(f.truncated ? await (await fetch(f.raw_url, { cache: 'no-store' })).text() : f.content);
+      text = f ? (f.truncated ? await (await fetch(f.raw_url, { cache: 'no-store' })).text() : f.content) : '';
+    } else {
+      const r = await fetch(`${RAW()}/${sync.owner}/${sync.id}/raw/${Y.FILE}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(syncError(r.status));
+      text = await r.text();
     }
-    const r = await fetch(`${RAW()}/${sync.owner}/${sync.id}/raw/${Y.FILE}?t=${Date.now()}`, { cache: 'no-store' });
-    if (!r.ok) throw new Error(syncError(r.status));
-    return parseTeamText(await r.text());
+    return parseTeamText(text);
+  }
+  /** Download and unlock the team data. Null when no team has been set up yet. */
+  async function fetchTeamData() {
+    const file = await fetchTeamFile();
+    if (!file || !file.enc) return null;
+    if (file.salt !== sync.salt) throw new LockedOut('The team password was changed. Enter the new one.');
+    let content;
+    try {
+      content = await Y.unseal(sync.key, file);
+    } catch (_) {
+      throw new LockedOut('The team password was changed. Enter the new one.');
+    }
+    if (content.token && content.token !== sync.token) sync.token = content.token;
+    return content.payload || null;
   }
   async function pushTeamData() {
+    const file = await Y.seal(sync.key, sync.salt, { payload: Y.toPayload(db), token: sync.token });
     const r = await fetch(`${API()}/gists/${sync.id}`, {
       method: 'PATCH',
       headers: { ...ghHeaders(sync.token), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ files: { [Y.FILE]: { content: JSON.stringify(Y.toPayload(db)) } } }),
+      body: JSON.stringify({ files: { [Y.FILE]: { content: JSON.stringify(file) } } }),
     });
-    if (r.status === 403 || r.status === 404) throw new Error('This team key can’t save the team data (wrong GitHub account?).');
+    if (r.status === 401 || r.status === 403 || r.status === 404) throw new Error('The GitHub key no longer works — replace it in Settings → Team.');
     if (!r.ok) throw new Error(syncError(r.status));
     sync.lastPush = Date.now();
+  }
+
+  /* ----- the lock screen ----- */
+  const lock = { state: 'loading', file: null, msg: '', busy: false };
+  /** Look at the team file to know whether to ask for the password or to set one up. */
+  async function checkTeamFile() {
+    lock.state = 'loading';
+    render();
+    try {
+      const file = await fetchTeamFile();
+      lock.file = file && file.enc ? file : null;
+      lock.state = lock.file ? 'ready' : 'new';
+    } catch (e) {
+      lock.state = 'error';
+    }
+    render();
+  }
+  function lockOut(msg) {
+    delete sync.key;
+    delete sync.salt;
+    delete sync.token;
+    sync.lastSync = null;
+    saveSync();
+    lock.msg = msg || '';
+    checkTeamFile();
+  }
+  function renderLock() {
+    const head = `${logo()}<div class="lock-ico">🔒</div>`;
+    const note = lock.msg ? `<p class="hint warn" style="text-align:center">${esc(lock.msg)}</p>` : '';
+    if (lock.state === 'loading') return `${head}<section class="card"><div class="empty">Connecting…</div></section>`;
+    if (lock.state === 'error') {
+      return `${head}<section class="card" style="text-align:center"><p>No connection. The password is checked online the first time.</p>
+        <button class="primary" data-action="lockRetry">Try again</button></section>`;
+    }
+    if (lock.state === 'new') {
+      return `${head}
+        <section class="card">
+          <h3>Set up your team</h3>
+          <p class="hint" style="margin:0 0 12px">Choose the team password. Everything is locked with it, so make it long — four or five random words work well. You will share it with your players.</p>
+          <input class="text-in lock-in" id="lock-pass" type="text" placeholder="New team password" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="New team password">
+          <p class="hint" style="margin:14px 0 8px">GitHub key of ${esc(sync.owner)} (starts with ghp_). Needed once, only here — the others just need the password.</p>
+          <input class="text-in lock-in" id="lock-token" type="password" placeholder="GitHub key" value="${esc(sync.token || '')}" autocomplete="off" autocapitalize="off" spellcheck="false" data-enter="lockSetup" aria-label="GitHub key">
+          ${note}
+          <button class="primary" data-action="lockSetup" style="margin-top:14px" ${lock.busy ? 'disabled' : ''}>${lock.busy ? 'Locking…' : 'Lock and start'}</button>
+        </section>`;
+    }
+    return `${head}
+      <section class="card">
+        <h3>Team password</h3>
+        <p class="hint" style="margin:0 0 12px">Enter it once — this phone remembers it.</p>
+        <input class="text-in lock-in" id="lock-pass" type="password" placeholder="Password" autocomplete="current-password" autocapitalize="off" spellcheck="false" data-enter="lockOpen" aria-label="Team password">
+        ${note}
+        <button class="primary" data-action="lockOpen" style="margin-top:14px" ${lock.busy ? 'disabled' : ''}>${lock.busy ? 'Opening…' : 'Open'}</button>
+      </section>`;
+  }
+  async function checkGithubKey(key) {
+    const r = await fetch(`${API()}/user`, { headers: ghHeaders(key), cache: 'no-store' });
+    if (r.status === 401) return 'GitHub did not accept that key.';
+    if (!r.ok) return syncError(r.status);
+    const u = await r.json();
+    if (String(u.login).toLowerCase() !== String(sync.owner).toLowerCase()) return `That key belongs to ${u.login}, not ${sync.owner}.`;
+    return null;
   }
   const uiBusy = () => $('#modal-root').childElementCount > 0;
 
@@ -570,6 +653,10 @@
       sync.error = null;
       if (manual) toast('☁️ Synced with the team');
     } catch (e) {
+      if (e instanceof LockedOut) {
+        lockOut(e.message);
+        return;
+      }
       sync.error = (e && e.message && !/fetch|network|load failed/i.test(e.message)) ? e.message : 'No connection to GitHub — trying again soon.';
       if (manual) toast(`⚠️ ${sync.error}`, 3500);
     } finally {
@@ -628,7 +715,7 @@
       kind = 'err';
       text = '⚠️ Sync problem';
     } else if (!sync.lastSync) text = '☁️ Connecting to the team…';
-    else text = `☁️ ${canWrite() ? 'Team sync' : 'View only'} · ${agoTxt(sync.lastSync)}`;
+    else text = `🔒 Team sync · ${agoTxt(sync.lastSync)}`;
     return `<button class="sync-chip ${kind}" data-action="syncTap">${text}</button>`;
   }
   const syncBar = () => (syncOn() ? `<div class="sync-bar"><span class="sync-slot">${syncChip()}</span></div>` : '');
@@ -639,44 +726,17 @@
   }
 
   function syncCard() {
-    if (!syncOn()) {
-      return `
-      <section class="card" id="sync-card">
-        <h3>☁️ Team sync</h3>
-        <p class="hint" style="margin:0 0 10px">Share one history between all your phones. Paste the team link (a GitHub gist address).</p>
-        <div class="add-row">
-          <input class="text-in" id="team-link" placeholder="https://gist.github.com/…" autocomplete="off" autocapitalize="off" spellcheck="false" data-enter="connectTeam" aria-label="Team link">
-          <button class="secondary" data-action="connectTeam">Connect</button>
-        </div>
-      </section>`;
-    }
-    const link = `https://gist.github.com/${encodeURIComponent(sync.owner)}/${encodeURIComponent(sync.id)}`;
     return `
       <section class="card" id="sync-card">
-        <div class="card-head"><h3>☁️ Team sync</h3><span class="sync-slot">${syncChip()}</span></div>
+        <div class="card-head"><h3>🔒 Team</h3><span class="sync-slot">${syncChip()}</span></div>
         <ul class="calc-lines">
-          <li><span>Team data</span><b><a href="${link}" target="_blank" rel="noopener">${esc(sync.owner)}/${esc(sync.id.slice(0, 7))}…</a></b></li>
-          <li><span>This phone</span><b>${canWrite() ? '✅ saves to the team' : '👀 view only'}</b></li>
+          <li><span>Data</span><b>locked with the team password</b></li>
           <li><span>Last synced</span><b>${sync.lastSync ? DATE_TIME_FMT.format(new Date(sync.lastSync)) : 'not yet'}</b></li>
         </ul>
         ${sync.error ? `<p class="hint warn">⚠️ ${esc(sync.error)}</p>` : ''}
-        ${canWrite()
-          ? `<div class="btn-row"><button class="secondary" data-action="syncManual">🔄 Sync now</button><button class="ghost" data-action="removeKey">Remove key</button></div>`
-          : `<p class="hint" style="margin:12px 0 8px">To enter games from this phone, paste the <b>team key</b> (ask ${esc(sync.owner)}). Without it, this phone follows the team's games live.</p>
-          <div class="add-row">
-            <input class="text-in" type="password" id="team-key" placeholder="Team key" autocomplete="off" autocapitalize="off" spellcheck="false" data-enter="saveKey" aria-label="Team key">
-            <button class="secondary" data-action="saveKey">Save</button>
-          </div>
-          <button class="link" data-action="syncManual" style="margin-top:8px">🔄 Sync now</button>`}
-        <details style="margin-top:12px"><summary class="muted">How does ${esc(sync.owner)} make a team key?</summary>
-          <ol class="rules">
-            <li>Open <a href="https://github.com/settings/tokens/new?description=CHAMPIONS%20team%20key&amp;scopes=gist" target="_blank" rel="noopener">this GitHub page</a> while signed in as ${esc(sync.owner)}.</li>
-            <li>Leave only <b>gist</b> ticked, pick an expiry, tap <b>Generate token</b>.</li>
-            <li>Paste it here, and send it privately to the other scorekeepers.</li>
-          </ol>
-          <p class="hint">A gist-only key can change ${esc(sync.owner)}'s gists — not the app or any repository.</p>
-        </details>
-        <button class="link" data-action="disconnectTeam" style="margin-top:6px;color:var(--ink-3)">Disconnect this phone</button>
+        <p class="hint">To add a phone: open the app there and type the team password. That is all.</p>
+        <div class="btn-row"><button class="secondary" data-action="syncManual">🔄 Sync now</button><button class="secondary" data-action="changePassword">Change password</button></div>
+        <div class="btn-row" style="margin-bottom:0"><button class="ghost" data-action="replaceKey">Replace GitHub key</button><button class="ghost" data-action="lockPhone">Sign out this phone</button></div>
       </section>`;
   }
 
@@ -700,6 +760,15 @@
     renderPending = false;
     keepDraft();
     const app = $('#app');
+    if (!syncOn()) {
+      // locked: nothing of the team is shown without the password
+      const keep = {};
+      app.querySelectorAll('.lock-in').forEach((el) => { keep[el.id] = el.value; });
+      app.innerHTML = `<div class="lock-screen">${renderLock()}</div>`;
+      app.querySelectorAll('.lock-in').forEach((el) => { if (keep[el.id]) el.value = keep[el.id]; });
+      $('#tabbar').innerHTML = '';
+      return;
+    }
     let html = '';
     if (ui.tab === 'play') html = renderPlay();
     else if (ui.tab === 'rankings') html = renderRankings();
@@ -1737,50 +1806,141 @@
       syncNow(true);
     },
     syncManual: () => syncNow(true),
-    connectTeam: () => {
-      const t = Y.parseTeamLink(($('#team-link') || {}).value);
-      if (!t) return toast('Paste the gist link, like https://gist.github.com/name/1234…', 3500);
-      sync = { owner: t.owner, id: t.id };
-      saveSync();
+    lockRetry: () => checkTeamFile(),
+    lockOpen: async () => {
+      const pass = ($('#lock-pass') || {}).value || '';
+      if (!pass || lock.busy || !lock.file) return;
+      lock.busy = true;
+      lock.msg = '';
       render();
-      syncNow(true);
-    },
-    saveKey: async () => {
-      const el = $('#team-key');
-      const key = el ? el.value.trim() : '';
-      if (!key) return toast('Paste the team key first');
       try {
-        const r = await fetch(`${API()}/user`, { headers: ghHeaders(key), cache: 'no-store' });
-        if (r.status === 401) return toast('GitHub did not accept that key', 3000);
-        if (!r.ok) return toast(syncError(r.status), 3000);
-        const u = await r.json();
-        if (String(u.login).toLowerCase() !== String(sync.owner).toLowerCase()) {
-          return toast(`That key belongs to ${u.login}, but the team data belongs to ${sync.owner}`, 4500);
-        }
+        const key = await Y.deriveKey(pass, lock.file.salt, lock.file.iter);
+        const content = await Y.unseal(key, lock.file);
+        sync.key = key;
+        sync.salt = lock.file.salt;
+        sync.token = content.token;
+        sync.adopted = false;
+        sync.error = null;
+        saveSync();
+        lock.busy = false;
+        sfx.win();
+        render({ animate: true });
+        syncNow();
       } catch (_) {
-        return toast('No internet — try again', 3000);
+        lock.busy = false;
+        lock.msg = 'That password is not right.';
+        render();
+        const el = $('#lock-pass');
+        if (el) {
+          el.value = '';
+          el.focus();
+        }
       }
-      sync.token = key;
-      sync.error = null;
-      saveSync();
-      render();
-      syncNow(true);
     },
-    removeKey: async () => {
-      if (!(await confirmBox('Remove the team key?', 'This phone becomes view-only.', 'Remove key'))) return;
-      delete sync.token;
-      saveSync();
+    lockSetup: async () => {
+      const pass = (($('#lock-pass') || {}).value || '').trim();
+      const token = (($('#lock-token') || {}).value || '').trim();
+      if (lock.busy) return;
+      const fail = (m) => {
+        lock.busy = false;
+        lock.msg = m;
+        render();
+      };
+      if (pass.length < 12) return fail('Use at least 12 characters — a few random words is best.');
+      if (!token) return fail('Paste the GitHub key.');
+      lock.busy = true;
+      lock.msg = '';
       render();
+      try {
+        const bad = await checkGithubKey(token);
+        if (bad) return fail(bad);
+        const again = await fetchTeamFile();
+        if (again && again.enc) {
+          lock.busy = false;
+          return checkTeamFile(); // someone set it up meanwhile
+        }
+        const salt = Y.newSalt();
+        sync.salt = salt;
+        sync.token = token;
+        sync.key = await Y.deriveKey(pass, salt);
+        await pushTeamData();
+        sync.adopted = true;
+        sync.lastSync = Date.now();
+        sync.error = null;
+        saveSync();
+        lock.busy = false;
+        sfx.champ();
+        render({ animate: true });
+        toast('🔒 Locked. Share the password with your players.', 4000);
+      } catch (e) {
+        delete sync.key;
+        delete sync.salt;
+        fail(e && e.message && !/fetch|network|load failed/i.test(e.message) ? e.message : 'No connection — try again.');
+      }
     },
-    disconnectTeam: async () => {
-      if (!(await confirmBox('Disconnect this phone?', 'This phone stops syncing. Everything already on it stays here.', 'Disconnect'))) return;
-      sync = { disconnected: true };
-      saveSync();
-      render();
+    changePassword: async () => {
+      const ans = await ask({
+        title: 'New team password',
+        body: '<input class="text-in" placeholder="At least 12 characters" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="New team password">',
+        buttons: [{ label: 'Next', value: 'ok', kind: 'primary' }, { label: 'Cancel', value: null }],
+      });
+      if (ans.value !== 'ok') return;
+      const pass = String(ans.input || '').trim();
+      if (pass.length < 12) return toast('Use at least 12 characters', 3000);
+      if (!(await confirmBox('Change the password?', 'Every other phone will be asked for the new password.', 'Change it', 'primary'))) return;
+      const old = { key: sync.key, salt: sync.salt };
+      try {
+        const remote = await fetchTeamData(); // take in the latest before re-locking
+        if (remote) db = Y.mergeData(db, remote);
+        saveLocal();
+        sync.salt = Y.newSalt();
+        sync.key = await Y.deriveKey(pass, sync.salt);
+        await pushTeamData();
+        saveSync();
+        render();
+        toast('Password changed ✓');
+      } catch (e) {
+        Object.assign(sync, old);
+        toast(`⚠️ Not changed: ${e && e.message ? e.message : 'no connection'}`, 4000);
+      }
+    },
+    replaceKey: async () => {
+      const r = await ask({
+        title: 'Replace GitHub key',
+        body: `<p>Paste a new key of ${esc(sync.owner)} (gist only). All phones get it by themselves.</p><input class="text-in" type="password" autocomplete="off" autocapitalize="off" aria-label="GitHub key">`,
+        buttons: [{ label: 'Save', value: 'ok', kind: 'primary' }, { label: 'Cancel', value: null }],
+      });
+      const key = String(r.input || '').trim();
+      if (r.value !== 'ok' || !key) return;
+      const old = sync.token;
+      try {
+        const bad = await checkGithubKey(key);
+        if (bad) return toast(bad, 4000);
+        sync.token = key;
+        await pushTeamData();
+        sync.error = null;
+        saveSync();
+        render();
+        toast('GitHub key replaced ✓');
+      } catch (e) {
+        sync.token = old;
+        toast('⚠️ No connection — try again', 3000);
+      }
+    },
+    lockPhone: async () => {
+      if (!(await confirmBox('Sign out this phone?', 'The team data is removed from this phone. You need the password to get back in.', 'Sign out'))) return;
+      const theme = S().theme;
+      db = freshDb();
+      db.settings.theme = theme;
+      saveLocal();
+      ui.draft = null;
+      Object.assign(ui, { tab: 'play', view: 'home' });
+      try { localStorage.removeItem(DRAFT_KEY); } catch (_) { /* ignore */ }
+      lockOut('');
     },
     pickImport: () => $('#import-file').click(),
     resetAll: async () => {
-      if (!(await confirmBox('Erase everything?', syncOn() ? 'This erases this phone’s copy only — the team data comes back at the next sync. To leave the team, use “Disconnect this phone” first.' : 'All players, nights and settings on this device will be deleted. Save a backup first if you might need them.', 'Erase everything'))) return;
+      if (!(await confirmBox('Erase everything?', 'This erases this phone’s copy only — the team data comes back at the next sync.', 'Erase everything'))) return;
       if (!(await confirmBox('Really sure?', 'This cannot be undone.', 'Yes, erase it all'))) return;
       db = freshDb();
       save();
@@ -1998,6 +2158,7 @@
   if (activeNight()) ui.view = 'game';
   render({ animate: true });
   startSync();
+  if (!syncOn()) checkTeamFile();
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => { /* offline support is optional */ }));

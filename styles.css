@@ -827,3 +827,8 @@ body.theme-ocean .tabbar { background: rgba(2, 9, 20, 0.88); }
 }
 
 .rank-row .nm small { white-space: normal; line-height: 1.35; }
+
+/* ---------- lock screen ---------- */
+.lock-screen { max-width: 440px; margin: 0 auto; padding-top: 4vh; }
+.lock-ico { text-align: center; font-size: 44px; margin: 6px 0 2px; }
+.lock-screen .text-in { width: 100%; display: block; }
