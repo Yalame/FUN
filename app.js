@@ -194,7 +194,7 @@
     draft: null,
     reportId: null,
     historyId: null,
-    rank: { type: 'month', offset: 0, by: 'points' },
+    rank: { type: 'month', offset: 0, by: 'rating' },
     billInput: '',
     billTable: false,
     newPlayer: '',
@@ -774,9 +774,9 @@
           <div class="row">
             <span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>
             ${avatar(p.playerId)}
-            <span class="nm"><span class="name">${nameOf(p.playerId)}</span><small>${plural(p.nights, 'night')} · ${moneyHtml(p.total, true)}</small></span>
+            <span class="nm"><span class="name">${nameOf(p.playerId)}</span><small>${plural(p.nights, 'night')} · ${ptsTxt(p.pts)} pts · ${moneyHtml(p.total, true)}</small></span>
             <span class="crowns" title="Champion nights">${p.champions ? `👑${p.champions}` : ''}</span>
-            <span class="score">${ptsTxt(p.pts)}<small>pts</small></span>
+            <span class="score">${p.rating}<small>score</small></span>
           </div>`).join('')}</div>` : `<div class="empty"><span class="big">🂡</span>No finished nights this month yet.<br>Start one and crown a champion!</div>`}
       </section>
 
@@ -789,7 +789,7 @@
 
   function monthStandings() {
     const range = C.periodRange('month', 0);
-    return C.sortStandings(C.aggregate(finishedNights().filter((n) => C.inRange(n.date, range))), 'points');
+    return C.sortStandings(C.aggregate(finishedNights().filter((n) => C.inRange(n.date, range))), 'rating');
   }
 
   /* ---------- new night setup ---------- */
@@ -1153,7 +1153,7 @@
   function renderRankings() {
     const { type, offset, by } = ui.rank;
     const { range, nights, list } = rankingData();
-    const topPts = C.sortStandings(list, 'points')[0];
+    const topPts = C.sortStandings(list, 'rating')[0];
     const topCh = C.sortStandings(list, 'champions')[0];
     const types = [['week', 'Week'], ['month', 'Month'], ['year', 'Year'], ['all', 'All time']];
     return `
@@ -1166,23 +1166,24 @@
       </div>` : ''}
       ${list.length ? `
       <div class="kings">
-        <div class="king"><small>⭐ Most points</small>${avatar(topPts.playerId, 'lg')}<span class="nm">${nameOf(topPts.playerId)}</span><span class="big">${ptsTxt(topPts.pts)} pts</span></div>
+        <div class="king"><small>⭐ Best fair score</small>${avatar(topPts.playerId, 'lg')}<span class="nm">${nameOf(topPts.playerId)}</span><span class="big">${topPts.rating}</span></div>
         <div class="king"><small>👑 Most crowns</small>${topCh.champions ? `${avatar(topCh.playerId, 'lg')}<span class="nm">${nameOf(topCh.playerId)}</span><span class="big">${topCh.champions}× champ</span>` : '<span class="nm">—</span>'}</div>
       </div>
       <section class="card">
         <div class="card-head"><h3>${plural(nights.length, 'night')}</h3>
-          <div class="segbar" style="margin:0;width:190px"><button class="${by === 'points' ? 'on' : ''}" data-action="rankBy" data-v="points">Points</button><button class="${by === 'champions' ? 'on' : ''}" data-action="rankBy" data-v="champions">Crowns</button></div>
+          <div class="segbar" style="margin:0;width:220px"><button class="${by === 'rating' ? 'on' : ''}" data-action="rankBy" data-v="rating">Fair</button><button class="${by === 'points' ? 'on' : ''}" data-action="rankBy" data-v="points">Points</button><button class="${by === 'champions' ? 'on' : ''}" data-action="rankBy" data-v="champions">Crowns</button></div>
         </div>
-        <div class="rank-head"><span class="rk">#</span><span class="nm">Player</span><span class="crowns">👑</span><span class="score" style="min-width:52px">Pts</span></div>
+        <div class="rank-head"><span class="rk">#</span><span class="nm">Player</span><span class="crowns">👑</span><span class="score" style="min-width:52px">${by === 'rating' ? 'Score' : 'Pts'}</span></div>
         ${list.map((p) => `
           <div class="rank-row ${p.rank === 1 ? 'top1' : ''}">
             <span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>
             ${avatar(p.playerId)}
             <span class="nm"><span class="name">${nameOf(p.playerId)}</span>
-              <small>${plural(p.nights, 'night')} · ${plural(p.roundsWon, 'round')} won · <span class="${cls(p.total)}">${moneyHtml(p.total, true)}</span></small></span>
+              <small>${plural(p.nights, 'night')} · ${p.roundsWon}/${p.roundsPlayed} rounds won · ${by === 'rating' ? `${ptsTxt(p.pts)} pts` : `score ${p.rating}`} · <span class="${cls(p.total)}">${moneyHtml(p.total, true)}</span></small></span>
             <span class="crowns">${p.champions || '·'}</span>
-            <span class="score" style="min-width:52px">${ptsTxt(p.pts)}</span>
+            <span class="score" style="min-width:52px">${by === 'rating' ? p.rating : ptsTxt(p.pts)}</span>
           </div>`).join('')}
+        <p class="hint"><b>Fair score (0–100)</b> compares players who played different amounts: every round counts from 100 (won) to 0 (last) whatever the table size, rounds for more points weigh more, and the average starts at 50 until about ${C.RATING_PRIOR} rounds are played — so one lucky night can't beat a strong month.</p>
         <p class="hint">Money shown is after table, pot and bill. 👑 = champion nights.</p>
       </section>
       <button class="primary" data-action="shareRanking">📤 Share this report</button>`
@@ -1191,13 +1192,13 @@
   function rankingText() {
     const { range, nights, list } = rankingData();
     const L = [`🏆 CHAMPIONS — ${periodLabel(range)}`, `${plural(nights.length, 'night')} played`, ''];
-    const topPts = C.sortStandings(list, 'points')[0];
+    const topPts = C.sortStandings(list, 'rating')[0];
     const topCh = C.sortStandings(list, 'champions')[0];
-    if (topPts) L.push(`⭐ Most points: ${P(topPts.playerId).name} (${ptsTxt(topPts.pts)})`);
+    if (topPts) L.push(`⭐ Best fair score: ${P(topPts.playerId).name} (${topPts.rating})`);
     if (topCh && topCh.champions) L.push(`👑 Most crowns: ${P(topCh.playerId).name} (${topCh.champions}×)`);
     L.push('');
     for (const p of list) {
-      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — ${ptsTxt(p.pts)} pts · 👑${p.champions} · ${money(p.total, true)} (${plural(p.nights, 'night')})`);
+      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — score ${p.rating} · ${ptsTxt(p.pts)} pts · 👑${p.champions} · ${money(p.total, true)} (${plural(p.nights, 'night')}, ${plural(p.roundsPlayed, 'round')})`);
     }
     return L.join('\n');
   }

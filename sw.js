@@ -1,6 +1,6 @@
 /* CHAMPIONS offline support: keeps the app working without internet.
    Bump VERSION when shipping a new version of the files. */
-const VERSION = 'champions-v2';
+const VERSION = 'champions-v3';
 const FONTS = 'champions-fonts';
 const SHELL = [
   './',

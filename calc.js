@@ -223,6 +223,21 @@
     return out;
   }
 
+  // Fair score: how many "average rounds" a new player is assumed to have,
+  // so one lucky round does not put someone on top.
+  const RATING_PRIOR = 5;
+
+  /**
+   * Fair score 0–100 from a player's rounds.
+   * Each round gives a result between 1 (won) and 0 (last), whatever the number
+   * of players. Rounds for more points weigh more. The average is pulled toward
+   * 50 until enough rounds are played (RATING_PRIOR), so playing 3 nights or
+   * 1 night is compared fairly.
+   */
+  function fairScore(perfSum, weightSum) {
+    return Math.round(((perfSum + RATING_PRIOR * 0.5) / (weightSum + RATING_PRIOR)) * 1000) / 10;
+  }
+
   /** Totals per player over many finished nights (for week / month / all-time). */
   function aggregate(nights) {
     const per = new Map();
@@ -235,7 +250,7 @@
         if (!per.has(p.playerId)) {
           per.set(p.playerId, {
             playerId: p.playerId, nights: 0, champions: 0, pts: 0, won: 0, lost: 0, fees: 0,
-            bill: 0, roundsWon: 0, roundsPlayed: 0, bestNight: null,
+            bill: 0, roundsWon: 0, roundsPlayed: 0, bestNight: null, perfSum: 0, weightSum: 0,
           });
         }
         const a = per.get(p.playerId);
@@ -250,6 +265,16 @@
         if (a.bestNight === null || p.pts > a.bestNight) a.bestNight = p.pts;
         if (sum.champions.includes(p.playerId)) a.champions += 1;
       }
+      for (const round of night.rounds) {
+        const n = round.results.length;
+        const w = Number(round.points) || 1;
+        for (const r of round.results) {
+          const a = per.get(r.playerId);
+          if (!a) continue;
+          a.perfSum += w * (n > 1 ? (n - r.place) / (n - 1) : 0.5);
+          a.weightSum += w;
+        }
+      }
     }
     return [...per.values()].map((a) => {
       const money = r2(a.won - a.lost);
@@ -263,12 +288,17 @@
         money,
         total: r2(money - a.fees - a.bill), // what they are really up or down
         avgPts: a.nights ? r2(a.pts / a.nights) : 0,
+        rating: fairScore(a.perfSum, a.weightSum),
       };
     });
   }
 
-  /** Sort standings by points or by champion titles; ties share a rank. */
+  /** Sort standings by fair score, points or champion titles; ties share a rank. */
   function sortStandings(list, by) {
+    if (by === 'rating') {
+      const sorted = list.slice().sort((a, b) => b.rating - a.rating || b.pts - a.pts || b.champions - a.champions);
+      return assignRanks(sorted, (p) => p.rating);
+    }
     const byPts = (a, b) => b.pts - a.pts || b.champions - a.champions || b.money - a.money;
     const byChamps = (a, b) => b.champions - a.champions || b.pts - a.pts || b.money - a.money;
     const sorted = list.slice().sort(by === 'champions' ? byChamps : byPts);
@@ -309,7 +339,7 @@
 
   const Calc = {
     r2, DEFAULT_SETTINGS, DEFAULT_SPLITS, potFee, fullAmount, buildRound, nightSummary,
-    sharesFor, billPlan, billByPlayer, aggregate, sortStandings, isoDate, periodRange, inRange,
+    sharesFor, billPlan, billByPlayer, aggregate, fairScore, RATING_PRIOR, sortStandings, isoDate, periodRange, inRange,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Calc;
   else root.Calc = Calc;

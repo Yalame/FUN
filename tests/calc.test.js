@@ -166,6 +166,29 @@ test('aggregate counts champion titles and points across nights', () => {
   assert.strictEqual(b.bill, 50 - 5); // B was last in night 1: pays bill minus A's 5 € pot
 });
 
+test('fair score: one good night does not beat three good nights; more play counts', () => {
+  const win = (order) => C.buildRound(1, order, {}, S);
+  // A plays 3 nights (9 rounds) and wins 6; B plays 1 night (3 rounds) and wins 2; C is always there, never wins
+  const nA = (i) => night(['A', 'C', 'D'], [win(['A', 'C', 'D']), win(['A', 'D', 'C']), win(['D', 'A', 'C'])], { date: `2026-11-0${i}` });
+  const nB = night(['B', 'C', 'D'], [win(['B', 'C', 'D']), win(['B', 'D', 'C']), win(['D', 'B', 'C'])]);
+  const st = C.sortStandings(C.aggregate([nA(1), nA(2), nA(3), nB]), 'rating');
+  const r = Object.fromEntries(st.map((x) => [x.playerId, x]));
+  assert.strictEqual(st[0].playerId, 'A');
+  assert.ok(r.A.rating > r.B.rating, 'same win rate, more rounds ranks higher');
+  assert.ok(r.B.rating > r.C.rating);
+  assert.ok(r.A.pts > r.B.pts * 2, 'plain points would only reward showing up');
+  assert.ok(r.A.rating <= 100 && r.C.rating >= 0);
+});
+
+test('fair score: winning at a table of 6 and of 3 both count as a full win; no rounds = 50', () => {
+  assert.strictEqual(C.fairScore(0, 0), 50);
+  const big = night(['A', 'B', 'C', 'D', 'E', 'F'], [C.buildRound(1, ['A', 'B', 'C', 'D', 'E', 'F'], {}, S)]);
+  const small = night(['X', 'Y', 'Z'], [C.buildRound(1, ['X', 'Y', 'Z'], {}, S)]);
+  const r = Object.fromEntries(C.aggregate([big, small]).map((x) => [x.playerId, x]));
+  assert.strictEqual(r.A.rating, r.X.rating);
+  assert.strictEqual(r.F.rating, r.Z.rating);
+});
+
 test('week runs Monday to Sunday', () => {
   const r = C.periodRange('week', 0, new Date(2026, 10, 8)); // Sun 8 Nov 2026
   assert.strictEqual(r.start, '2026-11-02');

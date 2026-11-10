@@ -825,3 +825,5 @@ body.theme-ocean .tabbar { background: rgba(2, 9, 20, 0.88); }
   .chips { gap: 8px 4px; }
   .pchip .disc { width: 48px; height: 48px; }
 }
+
+.rank-row .nm small { white-space: normal; line-height: 1.35; }

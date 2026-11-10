@@ -20,6 +20,10 @@ It runs in any browser and installs on iPhone and Mac like a normal app. Works o
 7. **Late joiners** — someone joining mid-night can get starting points: last place's points,
    the table average, 0 or any number (changeable later from the Rounds list).
 8. **Champion** — most points of the night (a tie gives two champions).
+9. **Fair score (0–100)** — the week / month / all-time ranking. Each round counts from 100 (won)
+   to 0 (last) whatever the table size, rounds for more points weigh more, and the average starts
+   at 50 until about 5 rounds are played. This way someone who played one night is compared
+   fairly with someone who played three. Plain points and crowns can still be shown.
 
 All numbers above can be changed in **Settings**.
 
