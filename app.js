@@ -3,15 +3,16 @@
   'use strict';
   const C = window.Calc;
   const Y = window.SyncLib;
+  const K = window.Charts;
   const KEY = 'champions.v1';
-  const APP_VERSION = '1.0';
+  const APP_VERSION = '2.0';
   const EMOJIS = ['🦁', '🐯', '🦊', '🐺', '🦅', '🐻', '🐼', '🦈', '🐙', '🦄', '🐲', '🦖', '🐸', '🐵', '🦉', '🐝', '🦂', '🐊', '🦬', '🐆', '🦩', '🐧', '🐳', '🦍', '🐗', '🦓', '🐍', '🦚'];
   const CHIP_COLORS = ['#e23b3b', '#2f6fe0', '#1f9d55', '#222226', '#8e44ad', '#e67e22', '#c99a06'];
   const THEMES = {
-    felt: { name: 'Vegas', swatch: 'radial-gradient(circle at 50% 20%, #1f8f55, #04210f)', color: '#0a3a22' },
-    royal: { name: 'Royal', swatch: 'radial-gradient(circle at 50% 20%, #5134b5, #0b0626)', color: '#1a1240' },
-    ruby: { name: 'Ruby', swatch: 'radial-gradient(circle at 50% 20%, #b1213b, #220308)', color: '#3a0912' },
-    ocean: { name: 'Ocean', swatch: 'radial-gradient(circle at 50% 20%, #1a6aa3, #020d1a)', color: '#0b2236' },
+    felt: { name: 'Vegas', swatch: 'radial-gradient(circle at 50% 30%, #23935a, #0b4428 60%, #041a0e)', color: '#0a2418' },
+    royal: { name: 'Royal', swatch: 'radial-gradient(circle at 50% 30%, #5b3fc4, #2a1a6a 60%, #0c0726)', color: '#140d33' },
+    ruby: { name: 'Ruby', swatch: 'radial-gradient(circle at 50% 30%, #c22a45, #6a0f20 60%, #1e0308)', color: '#220810' },
+    ocean: { name: 'Ocean', swatch: 'radial-gradient(circle at 50% 30%, #2378b5, #0d3a5e 60%, #03101d)', color: '#071827' },
   };
 
   /* ================= helpers ================= */
@@ -110,6 +111,11 @@
   const nightById = (id) => db.nights.find((n) => n.id === id);
   const byNewest = (a, b) => b.date.localeCompare(a.date) || (b.startedAt || 0) - (a.startedAt || 0);
   const finishedNights = () => db.nights.filter((n) => n.status === 'finished' && n.rounds.length).sort(byNewest);
+  /** Players still at the table tonight (everyone who has not left early). */
+  const seatedIds = (night) => {
+    const gone = C.leavesBy(night);
+    return night.playerIds.filter((id) => !gone.has(id));
+  };
 
   function addPlayer(rawName) {
     const name = String(rawName || '').trim().replace(/\s+/g, ' ').slice(0, 24);
@@ -152,7 +158,7 @@
     const a = Math.abs(v);
     const txt = Number.isInteger(a) ? String(a) : a.toFixed(2);
     const sign = v < 0 ? '−' : signed && v > 0 ? '+' : '';
-    return `${sign}${txt} ${S().currency}`;
+    return `${sign}${txt} ${S().currency}`; // no line break between the number and €
   }
   const moneyHtml = (v, signed = false) => esc(money(v, signed));
   function ptsTxt(v, signed = false) {
@@ -169,6 +175,15 @@
   const toDate = (iso) => new Date(`${iso}T12:00:00`);
   const fmtDate = (iso) => DATE_FMT.format(toDate(iso));
   const pctTxt = (x) => `${Math.round(x * 10) / 10}%`;
+  const pct0 = (x) => `${Math.round(x * 100)}%`;
+  const scoreTxt = (v) => (Math.round((Number(v) || 0) * 10) / 10).toFixed(1);
+  /** Money without the currency sign, for table columns that say the currency in the header. */
+  function moneyNum(v, signed = false) {
+    v = C.r2(v);
+    const a = Math.abs(v);
+    const txt = Number.isInteger(a) ? String(a) : a.toFixed(2);
+    return `${v < 0 ? '−' : signed && v > 0 ? '+' : ''}${txt}`;
+  }
   const medal = (rank) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : String(rank));
   const medalTxt = (rank) => (rank <= 3 ? medal(rank) : `${rank}.`);
   const ordinal = (n) => {
@@ -184,7 +199,7 @@
     return `<span class="av ${size}" style="--h:${p.hue | 0}">${p.emoji}</span>`;
   }
   const CROWN = '<svg class="crown" viewBox="0 0 64 48" aria-hidden="true"><path d="M5 17l13 11L32 7l14 21 13-11-5 25H10z" fill="url(#g-gold)" stroke="#7a5200" stroke-width="2" stroke-linejoin="round"/><circle cx="5" cy="16" r="4" fill="url(#g-gold)" stroke="#7a5200" stroke-width="1.6"/><circle cx="32" cy="6" r="4" fill="url(#g-gold)" stroke="#7a5200" stroke-width="1.6"/><circle cx="59" cy="16" r="4" fill="url(#g-gold)" stroke="#7a5200" stroke-width="1.6"/><rect x="10" y="40" width="44" height="6" rx="2" fill="url(#g-gold)" stroke="#7a5200" stroke-width="1.6"/><circle cx="32" cy="32" r="3.2" fill="#e5484d"/><circle cx="20" cy="34" r="2.4" fill="#2f6fe0"/><circle cx="44" cy="34" r="2.4" fill="#1f9d55"/></svg>';
-  const logo = (small) => `<header class="logo ${small ? 'small' : ''}">${CROWN}<h1>CHAMPIONS</h1>${small ? '' : '<p>Poker night · points · the bill</p>'}</header>`;
+  const logo = (small) => `<header class="logo ${small ? 'small' : ''}">${CROWN}<h1>CHAMPIONS</h1>${small ? '' : '<p><i class="suit">♠</i> Poker night · points · the bill <i class="suit red">♦</i></p>'}</header>`;
 
   /* ================= UI state ================= */
   const ui = {
@@ -194,9 +209,11 @@
     draft: null,
     reportId: null,
     historyId: null,
-    rank: { type: 'month', offset: 0, by: 'rating' },
+    // rankings: period, ranking kind, sub-view (board | table | curves | bills), table sort, curve metric, highlighted player
+    rank: { type: 'month', offset: 0, by: 'rating', view: 'board', sort: null, metric: 'rank', focus: null },
     billInput: '',
     billTable: false,
+    billExtras: [], // [{ playerId, amount }] extra money toward tonight's bill
     newPlayer: '',
     showHidden: false,
   };
@@ -431,7 +448,7 @@
   function nightText(night) {
     const sum = C.nightSummary(night);
     const plan = night.bill ? C.billPlan(sum, night.bill) : null;
-    const billBy = C.billByPlayer(night, sum);
+    const billBy = plan ? plan.byPlayer : {};
     const L = [];
     L.push(`🏆 CHAMPIONS — ${fmtDate(night.date)}`);
     if (sum.champions.length) {
@@ -440,13 +457,19 @@
     }
     L.push('', `Ranking (${plural(sum.rounds, 'round')}):`);
     for (const p of sum.players) {
-      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — ${ptsTxt(p.pts)} pts${p.start ? ` (incl. ${ptsTxt(p.start)} start pts)` : ''} · won ${money(p.won)} · lost ${money(p.lost)} · fees ${money(p.fees)}`);
+      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — ${ptsTxt(p.pts)} pts${p.start ? ` (incl. ${ptsTxt(p.start)} start pts)` : ''}${p.left ? ` · left after round ${p.leftAfter}` : ''} · won ${money(p.won)} · lost ${money(p.lost)} · fees ${money(p.fees)}`);
     }
     L.push('', `🍯 Pot: ${money(sum.potTotal)} · 🪑 Table: ${money(sum.tableTotal)}`);
     if (plan) {
-      L.push(`🧾 Bill ${money(plan.invoice)} − ${plan.tableToInvoice ? 'pot + table' : 'pot'} ${money(plan.covered)} = ${money(plan.remaining)} to pay`);
+      const off = [`pot ${money(plan.potTotal)}`];
+      if (plan.tableToInvoice) off.push(`table ${money(plan.tableUsed)}`);
+      if (plan.leftTotal) off.push(`paid when leaving ${money(plan.leftTotal)}`);
+      if (plan.extrasTotal) off.push(`extra ${money(plan.extrasTotal)}`);
+      L.push(`🧾 Bill ${money(plan.invoice)} − ${off.join(' − ')} = ${money(plan.remaining)} for ${plural(plan.payers, 'player')}`);
+      for (const l of plan.leavers) L.push(`   👋 ${P(l.playerId).name} left after round ${l.afterRound} and paid ${money(l.paid)}`);
+      for (const e of plan.extras) L.push(`   ➕ ${P(e.playerId).name} paid ${money(e.amount)} extra`);
       for (const l of plan.lines) if (l.amount > 0) L.push(`   • ${P(l.playerId).name}: ${pctTxt(l.pct)} → ${money(l.amount)}${l.tied ? ' (tied)' : ''}`);
-      if (plan.leftover > 0) L.push(`   ${money(plan.leftover)} left over in the pot`);
+      if (plan.leftover > 0) L.push(`   ${money(plan.leftover)} left over`);
     }
     L.push('', 'Tonight overall (money − fees − bill):');
     for (const p of sum.players) L.push(`   ${P(p.playerId).name}: ${money(p.net - (billBy[p.playerId] || 0), true)}`);
@@ -648,6 +671,12 @@
         if (changed) softRender();
       }
       sync.adopted = true;
+      // money rules saved by an older version (e.g. 5 € to the pot for a winner on 5 €): upgrade once, for the whole team
+      if (C.upgradeRules(db.settings)) {
+        markSettings();
+        saveLocal();
+        softRender();
+      }
       if (canWrite() && Y.fingerprint(db) !== Y.fingerprint(remote)) await pushTeamData();
       sync.lastSync = Date.now();
       sync.error = null;
@@ -775,10 +804,33 @@
     else if (ui.tab === 'history') html = renderHistory();
     else if (ui.tab === 'players') html = renderPlayers();
     else html = renderSettings();
+    // keep sideways scroll positions (wide tables) when the screen is redrawn
+    const keep = {};
+    app.querySelectorAll('[data-keep]').forEach((el) => { keep[el.dataset.keep] = el.scrollLeft; });
     app.innerHTML = `<div class="${opts.animate ? 'view-enter' : ''}">${html}</div>`;
+    app.querySelectorAll('[data-keep]').forEach((el) => { if (keep[el.dataset.keep]) el.scrollLeft = keep[el.dataset.keep]; });
     renderTabbar();
+    drawCharts();
     if (opts.top) window.scrollTo({ top: 0 });
   }
+
+  /* ---------- charts: drawn once the screen is on the page, at its real width ---------- */
+  const chartJobs = {};
+  function drawCharts(onlyResized = false) {
+    document.querySelectorAll('[data-chart]').forEach((host) => {
+      const job = chartJobs[host.dataset.chart];
+      if (!job) return;
+      const w = String(host.clientWidth);
+      if (onlyResized && host.dataset.w === w) return;
+      host.dataset.w = w;
+      K.lineChart(host, job);
+    });
+  }
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => drawCharts(true), 150);
+  });
   const go = (patch) => {
     Object.assign(ui, patch);
     render({ animate: true, top: true });
@@ -815,14 +867,16 @@
     const month = monthStandings();
     const totalRounds = finished.reduce((a, n) => a + n.rounds.length, 0);
     const totalPot = finished.reduce((a, n) => a + C.nightSummary(n).potTotal, 0);
+    const bills = C.billStats(finished);
     const needBackup = finished.length >= 3 && (!db.lastBackup || Date.now() - db.lastBackup > 30 * 864e5);
     const installHint = !isStandalone() && isIOS();
     return `
       ${logo()}
       ${syncBar()}
       <button class="cta" data-action="newNight">
-        <span class="cta-icon">🃏</span>
-        <span><b>Start tonight</b><small>Pick the players and deal the first round</small></span>
+        <span class="cta-chip" aria-hidden="true"><span>♠</span></span>
+        <span class="cta-txt"><b>Start tonight</b><small>Pick the players and deal the first round</small></span>
+        <span class="cta-go" aria-hidden="true">›</span>
       </button>
 
       ${installHint ? `<section class="card notice"><span class="ico">📲</span><div><b>Install on your iPhone</b><p>Tap <b>Share</b> <span aria-hidden="true">⬆️</span> then <b>Add to Home Screen</b>.</p></div></section>` : ''}
@@ -838,21 +892,22 @@
       </section>` : ''}
 
       <section class="card">
-        <div class="card-head"><h3>${MONTH_FMT.format(new Date())}</h3><button class="link" data-action="tab" data-tab="rankings">Full ranking →</button></div>
+        <div class="card-head"><h3>${MONTH_FMT.format(new Date())}</h3><button class="link" data-action="openRanking">Full ranking →</button></div>
         ${month.length ? `<div class="mini-board">${month.slice(0, 5).map((p) => `
-          <div class="row">
+          <button class="row" data-action="showPlayer" data-id="${p.playerId}" data-scope="month">
             <span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>
             ${avatar(p.playerId)}
-            <span class="nm"><span class="name">${nameOf(p.playerId)}</span><small>${plural(p.nights, 'night')} · ${ptsTxt(p.pts)} pts · ${moneyHtml(p.total, true)}</small></span>
+            <span class="nm"><span class="name">${nameOf(p.playerId)}${p.provisional ? '<i class="tag">new</i>' : ''}</span><small>${plural(p.nights, 'night')} · ${ptsTxt(p.pts)} pts · <span class="${cls(p.total)}">${moneyHtml(p.total, true)}</span></small></span>
             <span class="crowns" title="Champion nights">${p.champions ? `👑${p.champions}` : ''}</span>
-            <span class="score">${p.rating}<small>score</small></span>
-          </div>`).join('')}</div>` : `<div class="empty"><span class="big">🂡</span>No finished nights this month yet.<br>Start one and crown a champion!</div>`}
+            <span class="score">${scoreTxt(p.rating)}<small>fair</small></span>
+          </button>`).join('')}</div>` : `<div class="empty"><span class="big">🂡</span>No finished nights this month yet.<br>Start one and crown a champion!</div>`}
       </section>
 
-      <div class="stats3">
-        <div class="stat"><b>${finished.length}</b><small>nights</small></div>
-        <div class="stat"><b>${totalRounds}</b><small>rounds</small></div>
-        <div class="stat"><b>${esc(money(totalPot))}</b><small>pot total</small></div>
+      <div class="tiles">
+        <div class="tile"><small>Nights</small><b>${finished.length}</b></div>
+        <div class="tile"><small>Rounds</small><b>${totalRounds}</b></div>
+        <div class="tile"><small>Pot collected</small><b>${esc(money(totalPot))}</b></div>
+        <div class="tile"><small>Bills paid</small><b>${esc(money(bills.totals.invoice))}</b></div>
       </div>`;
   }
 
@@ -914,7 +969,8 @@
       ui.draft = { nightId: night.id, points: lastPoints(night), amounts: {}, out: {}, order: [] };
     }
     const d = ui.draft;
-    d.order = d.order.filter((id) => night.playerIds.includes(id) && !d.out[id]);
+    const seated = seatedIds(night);
+    d.order = d.order.filter((id) => seated.includes(id) && !d.out[id]);
     return d;
   }
   /** Everything the round screen needs, computed once. */
@@ -922,7 +978,7 @@
     const d = draftFor(night);
     const s = S();
     const full = C.fullAmount(d.points, s);
-    const active = night.playerIds.filter((id) => !d.out[id]);
+    const active = seatedIds(night).filter((id) => !d.out[id]);
     const remaining = active.filter((id) => !d.order.includes(id));
     const complete = active.length >= 2 && remaining.length <= 1;
     const order = complete ? d.order.concat(remaining) : d.order.slice();
@@ -953,8 +1009,8 @@
           <div class="board-row">
             <span class="rk ${night.rounds.length && p.rank <= 3 ? 'medal' : ''}">${night.rounds.length ? medal(p.rank) : '·'}</span>
             ${avatar(p.playerId)}
-            <span class="nm"><span class="name">${nameOf(p.playerId)}${sum.champions.includes(p.playerId) ? ' 👑' : ''}</span>
-              <small>${p.start ? `${ptsTxt(p.start)} start pts · ` : ''}${plural(p.roundsWon, 'win')} · money <span class="${cls(p.net)}">${moneyHtml(p.net, true)}</span> after fees</small></span>
+            <span class="nm"><span class="name">${nameOf(p.playerId)}${sum.champions.includes(p.playerId) ? ' 👑' : ''}${p.left ? '<i class="tag">left</i>' : ''}</span>
+              <small>${p.left ? `left after R${p.leftAfter} · paid ${moneyHtml(p.leftPaid)} · ` : ''}${p.start ? `${ptsTxt(p.start)} start pts · ` : ''}${plural(p.roundsWon, 'win')} · money <span class="${cls(p.net)}">${moneyHtml(p.net, true)}</span> after fees</small></span>
             <span class="score">${ptsTxt(p.pts)}<small>pts</small></span>
           </div>`).join('')}</div>
       </section>`;
@@ -964,6 +1020,7 @@
   function roundsCard(night, editable) {
     const items = night.rounds.map((r, i) => ({ key: i + 1, html: roundRow(r, i, editable) }));
     for (const j of night.joins || []) items.push({ key: (j.afterRound || 0) + 0.5, html: joinRow(j, editable) });
+    for (const [, l] of C.leavesBy(night)) items.push({ key: (l.afterRound || 0) + 0.75, html: leaveRow(l, editable) });
     if (!items.length) return '';
     items.sort((a, b) => a.key - b.key);
     if (editable) items.reverse();
@@ -979,6 +1036,15 @@
       <div class="round-main"><b>${avatar(j.playerId, 'sm')} ${nameOf(j.playerId)} joined after round ${j.afterRound}</b>
         <small>started with ${ptsTxt(j.pts)} pts</small></div>
       ${editable ? `<button class="icon-btn" data-action="editJoin" data-id="${j.id}" aria-label="Change starting points of ${nameOf(j.playerId)}">✎</button>` : ''}
+    </div>`;
+  }
+  function leaveRow(l, editable) {
+    return `<div class="round-row join-row leave-row">
+      <div class="round-no">👋<small>left</small></div>
+      <div class="round-main"><b>${avatar(l.playerId, 'sm')} ${nameOf(l.playerId)} left after round ${l.afterRound || 0}</b>
+        <small>paid ${moneyHtml(l.paid || 0)} toward the bill · not in the bill split</small></div>
+      ${editable ? `<button class="icon-btn" data-action="editLeave" data-id="${l.id}" aria-label="Change what ${nameOf(l.playerId)} paid">✎</button>
+        <button class="icon-btn" data-action="undoLeave" data-id="${l.id}" aria-label="${nameOf(l.playerId)} is back at the table">↩︎</button>` : ''}
     </div>`;
   }
 
@@ -1055,7 +1121,7 @@
 
       <section class="card">
         <h3 class="step"><i>2</i>How much money does each player play?</h3>
-        <div class="bets">${night.playerIds.map(betRow).join('')}</div>
+        <div class="bets">${seatedIds(night).map(betRow).join('')}</div>
         <p class="hint">Money never changes points — only your place does. You lose at most what you play, and at most what the winner played.</p>
       </section>
 
@@ -1075,8 +1141,9 @@
 
       <div class="btn-row">
         <button class="secondary" data-action="addLate">＋ Player joins</button>
-        <button class="danger" data-action="finishNight">🏁 We're done</button>
-      </div>`;
+        <button class="secondary" data-action="leavePlayer">👋 Player leaves</button>
+      </div>
+      <button class="danger" data-action="finishNight">🏁 We're done — the bill</button>`;
   }
 
   function roundRow(r, i, deletable) {
@@ -1092,31 +1159,69 @@
   }
 
   /* ---------- the bill ---------- */
-  function billPreview(night) {
+  /** The bill as typed so far (amount, table money, extra money), split the way it would be saved. */
+  function billDraft(night) {
     const sum = C.nightSummary(night);
-    const invoice = parseNum(ui.billInput);
-    const plan = C.billPlan(sum, { invoice: Number.isFinite(invoice) ? invoice : 0, shares: C.sharesFor(sum.players.length, S()), tableToInvoice: ui.billTable });
-    const shares = C.sharesFor(sum.players.length, S());
+    const typed = parseNum(ui.billInput);
+    const payers = sum.players.filter((p) => !p.left).length;
+    const bill = { invoice: Number.isFinite(typed) ? typed : 0, shares: C.sharesFor(payers, S()), tableToInvoice: ui.billTable, extras: ui.billExtras };
+    return { sum, bill, plan: C.billPlan(sum, bill) };
+  }
+  /** Bill − what is already paid = what the ranking split pays; one row per player at the table. */
+  function billLines(plan) {
     return `
       <ul class="calc-lines">
         <li><span>Bill</span><b>${moneyHtml(plan.invoice)}</b></li>
-        <li><span>− Pot collected</span><b>${moneyHtml(sum.potTotal)}</b></li>
-        ${plan.tableToInvoice ? `<li><span>− Table money</span><b>${moneyHtml(sum.tableTotal)}</b></li>` : ''}
-        <li class="total"><span>Still to pay</span><b>${moneyHtml(plan.remaining)}</b></li>
-        ${plan.leftover > 0 ? `<li><span>Left over in the pot</span><b class="pos">${moneyHtml(plan.leftover)}</b></li>` : ''}
-      </ul>
-      <p class="hint">${sum.players.length} players → last place pays ${shares.map((x) => `${x}%`).join(' · ')}. Players tied on points share equally.</p>
-      <div style="margin-top:8px">${plan.lines.map((l) => `
+        <li><span>− Pot</span><b>${moneyHtml(plan.potTotal)}</b></li>
+        ${plan.tableToInvoice ? `<li><span>− Table money</span><b>${moneyHtml(plan.tableUsed)}</b></li>` : ''}
+        ${plan.leavers.map((l) => `<li><span>− ${nameOf(l.playerId)} <small>paid when leaving</small></span><b>${moneyHtml(l.paid)}</b></li>`).join('')}
+        ${plan.extras.map((e) => `<li><span>− ${nameOf(e.playerId)} <small>extra</small></span><b>${moneyHtml(e.amount)}</b></li>`).join('')}
+        <li class="total"><span>Split by ranking</span><b>${moneyHtml(plan.remaining)}</b></li>
+        ${plan.leftover > 0 ? `<li><span>Left over</span><b class="pos">${moneyHtml(plan.leftover)}</b></li>` : ''}
+      </ul>`;
+  }
+  /** A thin bar: how this bill was paid (pot, table, leaving, extra, players). */
+  function billBar(parts, tall = false) {
+    const shown = parts.filter((p) => p.v > 0);
+    const whole = shown.reduce((a, p) => a + p.v, 0);
+    if (!whole) return '';
+    const label = shown.map((p) => `${p.label} ${money(p.v)}`).join(', ');
+    return `<div class="${tall ? 'seg-tall' : 'seg-thin'}" role="img" aria-label="${esc(label)}">${shown.map((p) => {
+      const share = p.v / whole;
+      return `<span style="flex:${share.toFixed(4)};background:${p.c}" title="${esc(`${p.label}: ${money(p.v)}`)}">${tall && share >= 0.14 ? `<b>${Math.round(share * 100)}%</b>` : ''}</span>`;
+    }).join('')}</div>`;
+  }
+  const billParts = (x) => [
+    { k: 'pot', label: 'Pot', v: x.pot, c: K.PALETTE[0] },
+    { k: 'table', label: 'Table money', v: x.table, c: K.PALETTE[1] },
+    { k: 'left', label: 'Paid when leaving', v: x.left, c: K.PALETTE[2] },
+    { k: 'extras', label: 'Extra money', v: x.extras, c: K.PALETTE[3] },
+    { k: 'players', label: 'Players by ranking', v: x.players, c: K.PALETTE[4] },
+  ];
+  const planParts = (plan) => billParts({ pot: plan.potTotal, table: plan.tableUsed, left: plan.leftTotal, extras: plan.extrasTotal, players: plan.remaining });
+  function billLegend(parts) {
+    return `<div class="legend static">${parts.filter((p) => p.v > 0).map((p) => `<span class="lg-item"><i class="sq" style="background:${p.c}"></i>${p.label} <b>${moneyHtml(p.v)}</b></span>`).join('')}</div>`;
+  }
+
+  function billPreview(night) {
+    const { plan, bill } = billDraft(night);
+    return `
+      ${billLines(plan)}
+      ${billBar(planParts(plan))}
+      <p class="hint">${plural(plan.payers, 'player')} at the table → last place pays ${bill.shares.map((x) => `${x}%`).join(' · ')}. Tied players share equally.${plan.leavers.length ? ' Players who left are not in the split.' : ''}</p>
+      ${plan.payers ? `<div class="pay-list">${plan.lines.map((l) => `
         <div class="pay-row ${l.amount > 0 ? '' : 'free'}">
           ${avatar(l.playerId, 'sm')}
           <span class="nm"><span class="name">${nameOf(l.playerId)}${l.tied ? '<span class="tie-tag">tied</span>' : ''}</span><small>${ordinal(l.rank)} place</small></span>
           <span class="pct">${pctTxt(l.pct)}</span>
           <span class="amt">${l.amount > 0 ? moneyHtml(l.amount) : '—'}</span>
-        </div>`).join('')}</div>`;
+        </div>`).join('')}</div>` : '<p class="hint warn">Nobody is left at the table to pay the rest.</p>'}`;
   }
 
   function renderBill(night) {
     const sum = C.nightSummary(night);
+    const leaves = C.leavesBy(night);
+    const leavers = sum.players.filter((p) => p.left);
     return `
       <h2 class="page-title">🏁 That's it for tonight</h2>
       <p class="page-sub">${plural(night.rounds.length, 'round')} played · pot ${moneyHtml(sum.potTotal)} · table ${moneyHtml(sum.tableTotal)}</p>
@@ -1128,6 +1233,33 @@
         </div>
         <label class="check"><input type="checkbox" data-change="billTable" ${ui.billTable ? 'checked' : ''}> Also use the table money (${moneyHtml(sum.tableTotal)}) for the bill</label>
       </section>
+
+      <section class="card">
+        <div class="card-head"><h3>👋 Left early</h3><button class="link" data-action="leavePlayer">＋ Someone left</button></div>
+        ${leavers.length ? leavers.map((p) => {
+          const l = leaves.get(p.playerId);
+          return `<div class="pay-row">
+            ${avatar(p.playerId, 'sm')}
+            <span class="nm"><span class="name">${nameOf(p.playerId)}</span><small>left after round ${p.leftAfter}</small></span>
+            <span class="amt">${moneyHtml(p.leftPaid)}</span>
+            <button class="icon-btn" data-action="editLeave" data-id="${l.id}" aria-label="Change what ${nameOf(p.playerId)} paid">✎</button>
+            <button class="icon-btn" data-action="undoLeave" data-id="${l.id}" aria-label="${nameOf(p.playerId)} is back at the table">↩︎</button>
+          </div>`;
+        }).join('') : '<p class="muted">Nobody left early.</p>'}
+        <p class="hint">What they paid comes off the bill, and they are left out of the split.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h3>➕ Extra money</h3><button class="link" data-action="addExtra">＋ Add</button></div>
+        ${ui.billExtras.length ? ui.billExtras.map((e, i) => `<div class="pay-row">
+            ${avatar(e.playerId, 'sm')}
+            <span class="nm"><span class="name">${nameOf(e.playerId)}</span><small>paid extra toward the bill</small></span>
+            <span class="amt">${moneyHtml(e.amount)}</span>
+            <button class="icon-btn" data-action="removeExtra" data-i="${i}" aria-label="Remove the extra money of ${nameOf(e.playerId)}">✕</button>
+          </div>`).join('') : '<p class="muted">Nobody paid extra.</p>'}
+        <p class="hint">Extra money comes off the bill for everyone, like the pot. The rest is split by ranking.</p>
+      </section>
+
       <section class="card" id="bill-preview">${billPreview(night)}</section>
       <div class="stack">
         <button class="primary" data-action="confirmBill">Crown the champion 👑</button>
@@ -1139,7 +1271,7 @@
   function renderReport(night, fresh) {
     const sum = C.nightSummary(night);
     const plan = night.bill ? C.billPlan(sum, night.bill) : null;
-    const billBy = C.billByPlayer(night, sum);
+    const billBy = plan ? plan.byPlayer : {};
     const champs = sum.champions;
     const canReopen = !activeNight();
     return `
@@ -1156,14 +1288,11 @@
       <section class="card">
         <h3>🧾 The bill</h3>
         ${plan ? `
-        <ul class="calc-lines">
-          <li><span>Bill</span><b>${moneyHtml(plan.invoice)}</b></li>
-          <li><span>− ${plan.tableToInvoice ? 'Pot + table' : 'Pot'}</span><b>${moneyHtml(plan.covered)}</b></li>
-          <li class="total"><span>Paid by players</span><b>${moneyHtml(plan.remaining)}</b></li>
-          ${plan.leftover > 0 ? `<li><span>Left over in the pot</span><b class="pos">${moneyHtml(plan.leftover)}</b></li>` : ''}
-        </ul>
+        ${billLines(plan)}
+        ${billBar(planParts(plan))}
+        ${billLegend(planParts(plan))}
         ${plan.lines.filter((l) => l.amount > 0).map((l) => `
-          <div class="pay-row">${avatar(l.playerId, 'sm')}<span class="nm"><span class="name">${nameOf(l.playerId)}${l.tied ? '<span class="tie-tag">tied</span>' : ''}</span></span>
+          <div class="pay-row">${avatar(l.playerId, 'sm')}<span class="nm"><span class="name">${nameOf(l.playerId)}${l.tied ? '<span class="tie-tag">tied</span>' : ''}</span><small>${ordinal(l.rank)} place</small></span>
           <span class="pct">${pctTxt(l.pct)}</span><span class="amt">${moneyHtml(l.amount)}</span></div>`).join('')}`
           : '<p class="muted">No bill was entered for this night.</p>'}
         ${!plan || plan.tableToInvoice ? '' : `<p class="hint">Table money collected: <b>${moneyHtml(sum.tableTotal)}</b></p>`}
@@ -1176,7 +1305,7 @@
           const total = C.r2(p.net - bill);
           return `<div class="res ${champs.includes(p.playerId) ? 'is-champ' : ''}">
             <div class="res-head"><span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>${avatar(p.playerId)}
-              <span class="nm"><span class="name">${nameOf(p.playerId)}${champs.includes(p.playerId) ? ' 👑' : ''}</span><small>${plural(p.roundsWon, 'round')} won of ${p.roundsPlayed}${p.start ? ` · joined late with ${ptsTxt(p.start)} pts` : ''}</small></span>
+              <span class="nm"><span class="name">${nameOf(p.playerId)}${champs.includes(p.playerId) ? ' 👑' : ''}${p.left ? '<i class="tag">left</i>' : ''}</span><small>${plural(p.roundsWon, 'round')} won of ${p.roundsPlayed}${p.start ? ` · joined late with ${ptsTxt(p.start)} pts` : ''}${p.left ? ` · left after round ${p.leftAfter}` : ''}</small></span>
               <span class="res-pts">${ptsTxt(p.pts)}<small>pts</small></span></div>
             <div class="res-grid">
               <div><small>Won</small><b class="${p.won ? 'pos' : 'zero'}">${moneyHtml(p.won, true)}</b></div>
@@ -1212,62 +1341,312 @@
     const endIncl = new Date(range.endDate.getFullYear(), range.endDate.getMonth(), range.endDate.getDate() - 1);
     return `${DAYMON_FMT.format(range.startDate)} – ${DAYMONYEAR_FMT.format(endIncl)}`;
   }
-  function rankingData() {
+  const RANK_KINDS = [
+    ['rating', 'Fair', 'fair score'],
+    ['points', 'Overall', 'total points'],
+    ['champions', 'Champions', 'crowns'],
+  ];
+  const RANK_HINT = {
+    rating: `<b>Fair score (0–100)</b> — every round scores 100 for 1st down to 0 for last, whatever the table size. Rounds count more when more is at stake (a 4-point round counts double a 1-point round) and when more players sit at the table (less luck than heads-up). Everyone starts at 50 until about ${C.RATING_PRIOR} rounds are played — <i class="tag">new</i> marks players still below that — so one lucky night can't beat a strong month.`,
+    points: '<b>Overall</b> — all points added up, start points included. It rewards playing a lot as much as playing well; the Fair score compares players who played different amounts.',
+    champions: '<b>Champions</b> — nights won (most points of the night; a tie crowns both). The same number of crowns is split by fair score.',
+  };
+
+  /** The nights and standings of a period: the one picked in Rankings, or 'month' / 'all'. */
+  function rankingData(scope) {
     const { type, offset, by } = ui.rank;
-    const range = C.periodRange(type, offset);
+    const range = scope === 'month' ? C.periodRange('month', 0) : scope === 'all' ? C.periodRange('all', 0) : C.periodRange(type, offset);
     const nights = finishedNights().filter((n) => C.inRange(n.date, range));
-    const list = C.sortStandings(C.aggregate(nights), by);
-    return { range, nights, list };
+    const all = C.aggregate(nights);
+    return { range, nights, all, list: C.sortStandings(all, by) };
   }
+  /** One color per player for the curves: the 8 most active players (all time) get the hues, in a fixed order. */
+  function playerColors() {
+    const seen = new Set();
+    const order = C.aggregate(db.nights)
+      .sort((a, b) => b.roundsPlayed - a.roundsPlayed || (P(a.playerId).createdAt || 0) - (P(b.playerId).createdAt || 0))
+      .map((a) => {
+        seen.add(a.playerId);
+        return a.playerId;
+      });
+    for (const p of db.players) if (!seen.has(p.id)) order.push(p.id);
+    return K.colorMap(order);
+  }
+  /** Fair score after each night, per player (sparklines, player card). */
+  function ratingTrends(steps) {
+    const out = {};
+    steps.forEach((s, i) => {
+      for (const x of s.standings) {
+        if (!out[x.playerId]) out[x.playerId] = new Array(steps.length).fill(null);
+        out[x.playerId][i] = x.rating;
+      }
+    });
+    return out;
+  }
+
   function renderRankings() {
-    const { type, offset, by } = ui.rank;
-    const { range, nights, list } = rankingData();
-    const topPts = C.sortStandings(list, 'rating')[0];
-    const topCh = C.sortStandings(list, 'champions')[0];
+    const { type, offset, view } = ui.rank;
+    const data = rankingData();
     const types = [['week', 'Week'], ['month', 'Month'], ['year', 'Year'], ['all', 'All time']];
+    const views = [['board', '🏆', 'Ranking'], ['table', '📋', 'Stats'], ['curves', '📈', 'Curves'], ['bills', '🧾', 'Bills']];
+    let body;
+    if (!data.nights.length) body = '<section class="card"><div class="empty"><span class="big">🂮</span>No finished nights in this period.</div></section>';
+    else if (view === 'table') body = statsView(data);
+    else if (view === 'curves') body = curvesView(data);
+    else if (view === 'bills') body = billsView(data);
+    else body = boardView(data);
     return `
-      <h2 class="page-title">🏆 Rankings</h2>
-      <div class="segbar">${types.map(([k, l]) => `<button class="${type === k ? 'on' : ''}" data-action="rankType" data-v="${k}">${l}</button>`).join('')}</div>
-      ${type !== 'all' ? `<div class="period-nav">
-        <button class="icon-btn" data-action="rankShift" data-d="-1" aria-label="Previous">◀</button>
-        <b>${periodLabel(range)}</b>
-        <button class="icon-btn" data-action="rankShift" data-d="1" aria-label="Next" ${offset >= 0 ? 'disabled style="opacity:.3"' : ''}>▶</button>
-      </div>` : ''}
-      ${list.length ? `
-      <div class="kings">
-        <div class="king"><small>⭐ Best fair score</small>${avatar(topPts.playerId, 'lg')}<span class="nm">${nameOf(topPts.playerId)}</span><span class="big">${topPts.rating}</span></div>
-        <div class="king"><small>👑 Most crowns</small>${topCh.champions ? `${avatar(topCh.playerId, 'lg')}<span class="nm">${nameOf(topCh.playerId)}</span><span class="big">${topCh.champions}× champ</span>` : '<span class="nm">—</span>'}</div>
+      <h2 class="page-title">Rankings</h2>
+      <div class="filters">
+        <div class="segbar">${types.map(([k, l]) => `<button class="${type === k ? 'on' : ''}" data-action="rankType" data-v="${k}" aria-pressed="${type === k}">${l}</button>`).join('')}</div>
+        ${type !== 'all' ? `<div class="period-nav">
+          <button class="icon-btn" data-action="rankShift" data-d="-1" aria-label="Previous">◀</button>
+          <b>${periodLabel(data.range)}</b>
+          <button class="icon-btn" data-action="rankShift" data-d="1" aria-label="Next" ${offset >= 0 ? 'disabled' : ''}>▶</button>
+        </div>` : ''}
+      </div>
+      <nav class="viewtabs" aria-label="Ranking views">${views.map(([k, ico, l]) => `<button class="${view === k ? 'on' : ''}" data-action="rankView" data-v="${k}" aria-pressed="${view === k}"><span aria-hidden="true">${ico}</span>${l}</button>`).join('')}</nav>
+      ${body}`;
+  }
+
+  /* --- ranking: podium + leaderboard --- */
+  function boardView({ nights, list }) {
+    const by = ui.rank.by;
+    const steps = C.timeline(nights);
+    const trends = ratingTrends(steps);
+    const flat = Object.values(trends).flat().filter((v) => v != null);
+    const lo = Math.min(...flat);
+    const hi = Math.max(...flat);
+    const metric = (p) => (by === 'rating' ? [scoreTxt(p.rating), 'fair'] : by === 'points' ? [ptsTxt(p.pts), 'pts'] : [String(p.champions), p.champions === 1 ? 'crown' : 'crowns']);
+    const pod = (p, place) => {
+      if (!p) return '<div class="pod pod-none" aria-hidden="true"></div>';
+      const [v, u] = metric(p);
+      return `<button class="pod pod${place}" data-action="showPlayer" data-id="${p.playerId}" aria-label="${ordinal(p.rank)}: ${nameOf(p.playerId)}, ${v} ${u}">
+        ${place === 1 ? CROWN : ''}
+        ${avatar(p.playerId, place === 1 ? 'xl' : 'lg')}
+        <span class="pod-name">${nameOf(p.playerId)}</span>
+        <span class="pod-val">${v}<small>${u}</small></span>
+        <span class="pod-step"><span>${p.rank}</span></span>
+      </button>`;
+    };
+    const rows = list.map((p) => {
+      const [v, u] = metric(p);
+      const sub = by === 'rating' ? `${p.roundsWon}/${p.roundsPlayed} won` : `fair ${scoreTxt(p.rating)}`;
+      const spark = steps.length > 1 ? K.sparkline(trends[p.playerId] || [], { min: lo, max: hi }) : '';
+      return `<button class="lb-row ${p.rank === 1 ? 'top1' : ''}" data-action="showPlayer" data-id="${p.playerId}">
+        <span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>
+        ${avatar(p.playerId)}
+        <span class="nm"><span class="name">${nameOf(p.playerId)}${by !== 'champions' && p.champions ? `<i class="crown-tag">👑${p.champions}</i>` : ''}${by === 'rating' && p.provisional ? '<i class="tag">new</i>' : ''}</span>
+          <small>${sub} · <span class="${cls(p.total)}">${moneyHtml(p.total, true)}</span></small></span>
+        ${spark ? `<span class="trend" title="Fair score, night by night">${spark}</span>` : ''}
+        <span class="score">${v}<small>${u}</small></span>
+      </button>`;
+    }).join('');
+    return `
+      <div class="segbar kinds">${RANK_KINDS.map(([k, l]) => `<button class="${by === k ? 'on' : ''}" data-action="rankBy" data-v="${k}" aria-pressed="${by === k}">${l}</button>`).join('')}</div>
+      ${list.length > 1 ? `<div class="podium">${pod(list[1], 2)}${pod(list[0], 1)}${pod(list[2], 3)}</div>` : ''}
+      <section class="card board-card">
+        <div class="card-head"><h3>${plural(nights.length, 'night')} · ${plural(list.length, 'player')}</h3>${steps.length > 1 ? '<span class="muted">line = fair score trend</span>' : ''}</div>
+        ${rows}
+        <p class="hint">${RANK_HINT[by]}</p>
+        <p class="hint">Money is overall: cards won − lost, table &amp; pot fees and the bills. Tap a player for all their numbers.</p>
+      </section>
+      <button class="primary" data-action="shareRanking">📤 Share this ranking</button>`;
+  }
+
+  /* --- stats: one wide table, sticky names, sortable --- */
+  const STAT_COLS = [
+    { k: 'rating', h: 'Fair', f: (p) => scoreTxt(p.rating) },
+    { k: 'pts', h: 'Pts', f: (p) => ptsTxt(p.pts) },
+    { k: 'champions', h: '👑', f: (p) => p.champions || '·' },
+    { k: 'nights', h: 'Nights', f: (p) => p.nights },
+    { k: 'roundsPlayed', h: 'Rounds', f: (p) => p.roundsPlayed },
+    { k: 'roundsWon', h: 'Wins', f: (p) => p.roundsWon },
+    { k: 'winRate', h: 'Win %', f: (p) => pct0(p.winRate) },
+    { k: 'avgResult', h: 'Avg finish', f: (p) => Math.round(p.avgResult) },
+    { k: 'avgPts', h: 'Pts / night', f: (p) => ptsTxt(p.avgPts) },
+    { k: 'bestNight', h: 'Best night', f: (p) => ptsTxt(p.bestNight || 0) },
+    { k: 'money', h: 'Cards', cur: true, f: (p) => moneyNum(p.money, true), c: (p) => cls(p.money) },
+    { k: 'fees', h: 'Fees', cur: true, f: (p) => moneyNum(-p.fees), c: (p) => (p.fees ? 'neg' : 'zero') },
+    { k: 'bill', h: 'Bills', cur: true, f: (p) => moneyNum(-p.bill), c: (p) => (p.bill ? 'neg' : 'zero') },
+    { k: 'total', h: 'Net', cur: true, f: (p) => moneyNum(p.total, true), c: (p) => cls(p.total) },
+  ];
+  function statsView({ range, all }) {
+    const sort = ui.rank.sort || { k: ui.rank.by === 'points' ? 'pts' : ui.rank.by === 'champions' ? 'champions' : 'rating', dir: -1 };
+    const val = (p) => Number(p[sort.k]) || 0;
+    const rows = all.slice().sort((a, b) => (val(a) - val(b)) * sort.dir || b.rating - a.rating);
+    const cur = esc(S().currency);
+    return `
+      <section class="card table-card">
+        <div class="card-head"><h3>All stats</h3><span class="muted">${periodLabel(range)}</span></div>
+        <p class="hint" style="margin:0 0 10px">Tap a column to sort · swipe sideways for more · tap a name for the player card.</p>
+        <div class="stat-scroll" data-keep="stats" tabindex="0" role="region" aria-label="All stats, scrolls sideways">
+          <table class="stat-table">
+            <thead><tr><th class="sticky" scope="col">Player</th>${STAT_COLS.map((c) => {
+              const on = sort.k === c.k;
+              return `<th scope="col" class="${on ? 'on' : ''}" aria-sort="${on ? (sort.dir < 0 ? 'descending' : 'ascending') : 'none'}"><button data-action="rankSort" data-k="${c.k}">${c.h}${c.cur ? ` <small>${cur}</small>` : ''}<i aria-hidden="true">${on ? (sort.dir < 0 ? '▾' : '▴') : ''}</i></button></th>`;
+            }).join('')}</tr></thead>
+            <tbody>${rows.map((p, i) => `<tr>
+              <th class="sticky" scope="row"><button data-action="showPlayer" data-id="${p.playerId}"><span class="rk">${i + 1}</span>${avatar(p.playerId, 'sm')}<span class="tname">${nameOf(p.playerId)}</span></button></th>
+              ${STAT_COLS.map((c) => `<td class="${c.c ? c.c(p) : ''}${sort.k === c.k ? ' on' : ''}">${c.f(p)}</td>`).join('')}
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>
+        <ul class="col-help">
+          <li><b>Fair</b> fair score 0–100</li>
+          <li><b>Avg finish</b> average round result — 100 = always 1st, 0 = always last</li>
+          <li><b>Cards</b> money won − lost in the rounds</li>
+          <li><b>Fees</b> table + pot paid as round winner</li>
+          <li><b>Bills</b> paid toward bills: share, extra, when leaving</li>
+          <li><b>Net</b> cards − fees − bills</li>
+        </ul>
+      </section>`;
+  }
+
+  /* --- curves: how the ranking moved, night by night --- */
+  const CURVES = {
+    rank: { label: 'Rank', title: 'Ranking after each night', sub: 'Position by fair score — #1 is the top.' },
+    rating: { label: 'Fair score', title: 'Fair score after each night', sub: '0–100 · everyone starts at 50.' },
+    pts: { label: 'Points', title: 'Points added up, night by night', sub: 'All points so far, start points included.' },
+    total: { label: 'Money', title: 'Money overall, night by night', sub: 'Cards won − lost − fees − bills, added up.' },
+  };
+  function curvesView({ nights, list }) {
+    const m = CURVES[ui.rank.metric] ? ui.rank.metric : 'rank';
+    const def = CURVES[m];
+    const steps = C.timeline(nights);
+    const colors = playerColors();
+    const pick = (x) => (m === 'rank' ? x.rank : m === 'rating' ? x.rating : m === 'pts' ? x.pts : x.total);
+    const series = list.map((p) => ({
+      id: p.playerId,
+      name: P(p.playerId).name,
+      color: colors[p.playerId] || K.OTHER,
+      values: steps.map((s) => {
+        const x = s.standings.find((q) => q.playerId === p.playerId);
+        return x ? pick(x) : null;
+      }),
+    }));
+    const valueTxt = m === 'total' ? (v) => money(v, true) : m === 'rating' ? (v) => scoreTxt(v) : m === 'rank' ? (v) => `#${v}` : (v) => ptsTxt(v);
+    const labels = steps.map((s) => DAYMON_FMT.format(toDate(s.date)));
+    const focus = series.some((s) => s.id === ui.rank.focus) ? ui.rank.focus : null;
+    chartJobs.curves = {
+      labels,
+      titles: steps.map((s) => fmtDate(s.date)),
+      series,
+      focus,
+      format: m === 'total' ? (v) => moneyNum(v, true) : m === 'rating' ? (v) => String(Math.round(v)) : (v) => ptsTxt(v),
+      tipFormat: valueTxt,
+      invert: m === 'rank',
+      zero: m === 'pts' || m === 'total',
+      height: 260,
+      label: `${def.title}, ${plural(steps.length, 'night')}`,
+      emptyText: 'No nights in this period yet.',
+    };
+    const table = `<div class="stat-scroll" data-keep="curve-table"><table class="stat-table mini">
+        <thead><tr><th class="sticky" scope="col">Player</th>${labels.map((l) => `<th scope="col">${esc(l)}</th>`).join('')}</tr></thead>
+        <tbody>${series.map((s) => `<tr><th class="sticky" scope="row"><span class="tkey" style="background:${s.color}"></span><span class="tname">${esc(s.name)}</span></th>${s.values.map((v) => `<td>${v == null ? '·' : esc(valueTxt(v))}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table></div>`;
+    return `
+      <div class="segbar">${Object.entries(CURVES).map(([k, c]) => `<button class="${m === k ? 'on' : ''}" data-action="rankMetric" data-v="${k}" aria-pressed="${m === k}">${c.label}</button>`).join('')}</div>
+      <section class="card chart-card">
+        <h3>${def.title}</h3>
+        <p class="chart-sub">${def.sub} Touch the chart to see everyone on that night.</p>
+        <div class="legend" role="group" aria-label="Highlight a player">${series.map((s) => `<button class="lg-item ${focus === s.id ? 'on' : ''} ${focus && focus !== s.id ? 'dim' : ''}" data-action="rankFocus" data-id="${s.id}" aria-pressed="${focus === s.id}"><i class="ln" style="background:${s.color}"></i>${esc(s.name)}</button>`).join('')}</div>
+        <div class="chart" data-chart="curves"></div>
+        ${steps.length < 2 ? '<p class="hint">Only one night in this period — choose Month, Year or All time to watch the curves grow.</p>' : ''}
+        <details class="table-view"><summary>Show the numbers</summary>${table}</details>
+      </section>`;
+  }
+
+  /* --- bills: what was paid, how, and by whom --- */
+  function billsView({ nights }) {
+    const st = C.billStats(nights);
+    const t = st.totals;
+    if (!t.nights) return '<section class="card"><div class="empty"><span class="big">🧾</span>No bills entered in this period.</div></section>';
+    const parts = billParts(t);
+    const before = C.r2(t.pot + t.table + t.left + t.extras);
+    const whole = before + t.players;
+    const share = (v) => (whole ? Math.round((v / whole) * 100) : 0);
+    const maxPaid = Math.max(1, ...st.players.map((p) => p.total));
+    const kinds = [['share', K.PALETTE[4], 'Share of the split'], ['extra', K.PALETTE[3], 'Extra money'], ['left', K.PALETTE[2], 'Paid when leaving']];
+    return `
+      <div class="tiles">
+        <div class="tile"><small>Bills</small><b>${moneyHtml(t.invoice)}</b><span>${plural(t.nights, 'night')}</span></div>
+        <div class="tile"><small>Average bill</small><b>${moneyHtml(st.avg)}</b><span>per night</span></div>
+        <div class="tile"><small>Paid before the split</small><b>${moneyHtml(before)}</b><span>${share(before)}% · pot, table, leaving, extra</span></div>
+        <div class="tile"><small>Split by ranking</small><b>${moneyHtml(t.players)}</b><span>${share(t.players)}% · lowest places pay</span></div>
       </div>
       <section class="card">
-        <div class="card-head"><h3>${plural(nights.length, 'night')}</h3>
-          <div class="segbar" style="margin:0;width:220px"><button class="${by === 'rating' ? 'on' : ''}" data-action="rankBy" data-v="rating">Fair</button><button class="${by === 'points' ? 'on' : ''}" data-action="rankBy" data-v="points">Points</button><button class="${by === 'champions' ? 'on' : ''}" data-action="rankBy" data-v="champions">Crowns</button></div>
-        </div>
-        <div class="rank-head"><span class="rk">#</span><span class="nm">Player</span><span class="crowns">👑</span><span class="score" style="min-width:52px">${by === 'rating' ? 'Score' : 'Pts'}</span></div>
-        ${list.map((p) => `
-          <div class="rank-row ${p.rank === 1 ? 'top1' : ''}">
-            <span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>
-            ${avatar(p.playerId)}
-            <span class="nm"><span class="name">${nameOf(p.playerId)}</span>
-              <small>${plural(p.nights, 'night')} · ${p.roundsWon}/${p.roundsPlayed} rounds won · ${by === 'rating' ? `${ptsTxt(p.pts)} pts` : `score ${p.rating}`} · <span class="${cls(p.total)}">${moneyHtml(p.total, true)}</span></small></span>
-            <span class="crowns">${p.champions || '·'}</span>
-            <span class="score" style="min-width:52px">${by === 'rating' ? p.rating : ptsTxt(p.pts)}</span>
-          </div>`).join('')}
-        <p class="hint"><b>Fair score (0–100)</b> compares players who played different amounts: every round counts from 100 (won) to 0 (last) whatever the table size, rounds for more points weigh more, and the average starts at 50 until about ${C.RATING_PRIOR} rounds are played — so one lucky night can't beat a strong month.</p>
-        <p class="hint">Money shown is after table, pot and bill. 👑 = champion nights.</p>
+        <h3>How the bills were paid</h3>
+        ${billBar(parts, true)}
+        ${billLegend(parts)}
+        ${t.leftover ? `<p class="hint">${moneyHtml(t.leftover)} was left over (more was paid in than the bills).</p>` : ''}
       </section>
-      <button class="primary" data-action="shareRanking">📤 Share this report</button>`
-      : `<section class="card"><div class="empty"><span class="big">🂮</span>No finished nights in this period.</div></section>`}`;
+      <section class="card">
+        <h3>Who paid the bills</h3>
+        <div class="legend static">${kinds.map(([, c, l]) => `<span class="lg-item"><i class="sq" style="background:${c}"></i>${l}</span>`).join('')}</div>
+        ${st.players.map((p) => `<button class="payer" data-action="showPlayer" data-id="${p.playerId}">
+          <span class="payer-top">${avatar(p.playerId, 'sm')}<span class="nm"><span class="name">${nameOf(p.playerId)}</span><small>paid ${p.paidNights} of ${plural(p.nights, 'night')} · ⌀ ${moneyHtml(p.avg)}</small></span><b>${moneyHtml(p.total)}</b></span>
+          <span class="hbar-track"><span class="hbar" style="width:${Math.max(p.total > 0 ? 3 : 0, (p.total / maxPaid) * 100).toFixed(1)}%">${kinds.filter(([k]) => p[k] > 0).map(([k, c]) => `<i style="flex:${p[k]};background:${c}"></i>`).join('')}</span></span>
+          <small class="payer-parts">share ${moneyHtml(p.share)}${p.extra ? ` · extra ${moneyHtml(p.extra)}` : ''}${p.left ? ` · when leaving ${moneyHtml(p.left)}` : ''} · pot fees ${moneyHtml(p.potFees)}</small>
+        </button>`).join('')}
+        <p class="hint">Pot fees are what they put in the pot as round winners — the pot pays the bill first.</p>
+      </section>
+      <section class="card">
+        <h3>Night by night</h3>
+        ${st.rows.map((r) => `<button class="bill-night" data-action="openNight" data-id="${r.nightId}">
+          <span class="bn-head"><b>${fmtDate(r.date)}</b><span>${moneyHtml(r.invoice)}</span></span>
+          ${billBar(billParts(r))}
+          <small>${billParts(r).filter((x) => x.v > 0).map((x) => `${x.label} ${moneyHtml(x.v)}`).join(' · ')}${r.leftover ? ` · left over ${moneyHtml(r.leftover)}` : ''}</small>
+        </button>`).join('')}
+      </section>`;
   }
+
+  /** A player's card: every number of the period, plus their fair-score curve. */
+  function playerCard(id, scope) {
+    const data = rankingData(scope);
+    const p = data.all.find((x) => x.playerId === id);
+    if (!p) return null;
+    const fair = C.sortStandings(data.all, 'rating').find((x) => x.playerId === id);
+    const steps = C.timeline(data.nights);
+    const trend = ratingTrends(steps)[id] || [];
+    const spark = steps.length > 1 ? K.sparkline(trend, { width: 280, height: 56 }) : '';
+    const tiles = [
+      ['Fair score', scoreTxt(p.rating), `#${fair.rank} of ${data.all.length}${p.provisional ? ' · new' : ''}`],
+      ['Points', ptsTxt(p.pts), `${ptsTxt(p.avgPts)} a night`],
+      ['Crowns', `👑 ${p.champions}`, plural(p.nights, 'night')],
+      ['Rounds won', `${p.roundsWon}/${p.roundsPlayed}`, pct0(p.winRate)],
+      ['Avg finish', String(Math.round(p.avgResult)), '100 = always 1st'],
+      ['Best night', `${ptsTxt(p.bestNight || 0)} pts`, p.leftEarly ? `left early ${p.leftEarly}×` : ''],
+      ['Cards', money(p.money, true), `won ${money(p.won)} · lost ${money(p.lost)}`],
+      ['Fees', money(p.fees), `pot ${money(p.potFees)} · table ${money(p.tableFees)}`],
+      ['Bills paid', money(p.bill), `${p.billNights} ${p.billNights === 1 ? 'night' : 'nights'} · most ${money(p.billMax)}`],
+      ['Overall', money(p.total, true), 'cards − fees − bills'],
+    ];
+    return {
+      title: `${avatar(id, 'lg')}<span class="pc-name">${nameOf(id)}</span>`,
+      body: `<p class="pc-period">${esc(periodLabel(data.range))} · ${plural(p.nights, 'night')}</p>
+        ${spark ? `<div class="pc-spark">${spark}<small>fair score, night by night</small></div>` : ''}
+        <div class="ptiles">${tiles.map(([l, v, s]) => `<div class="${l === 'Overall' ? cls(p.total) : ''}"><small>${l}</small><b>${esc(v)}</b>${s ? `<span>${esc(s)}</span>` : ''}</div>`).join('')}</div>`,
+    };
+  }
+
   function rankingText() {
-    const { range, nights, list } = rankingData();
-    const L = [`🏆 CHAMPIONS — ${periodLabel(range)}`, `${plural(nights.length, 'night')} played`, ''];
-    const topPts = C.sortStandings(list, 'rating')[0];
-    const topCh = C.sortStandings(list, 'champions')[0];
-    if (topPts) L.push(`⭐ Best fair score: ${P(topPts.playerId).name} (${topPts.rating})`);
-    if (topCh && topCh.champions) L.push(`👑 Most crowns: ${P(topCh.playerId).name} (${topCh.champions}×)`);
+    const { range, nights, all } = rankingData();
+    const by = ui.rank.by;
+    const list = C.sortStandings(all, by);
+    const kind = RANK_KINDS.find(([k]) => k === by);
+    const L = [`🏆 CHAMPIONS — ${periodLabel(range)}`, `${plural(nights.length, 'night')} played · ranked by ${kind ? kind[2] : 'fair score'}`, ''];
+    const fair = C.sortStandings(all, 'rating')[0];
+    const crowns = C.sortStandings(all, 'champions')[0];
+    if (fair) L.push(`⚖️ Best fair score: ${P(fair.playerId).name} (${scoreTxt(fair.rating)})`);
+    if (crowns && crowns.champions) L.push(`👑 Most crowns: ${P(crowns.playerId).name} (${crowns.champions}×)`);
     L.push('');
     for (const p of list) {
-      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — score ${p.rating} · ${ptsTxt(p.pts)} pts · 👑${p.champions} · ${money(p.total, true)} (${plural(p.nights, 'night')}, ${plural(p.roundsPlayed, 'round')})`);
+      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — fair ${scoreTxt(p.rating)} · ${ptsTxt(p.pts)} pts · 👑${p.champions} · ${money(p.total, true)} (${plural(p.nights, 'night')}, ${plural(p.roundsPlayed, 'round')})`);
+    }
+    const st = C.billStats(nights);
+    if (st.totals.nights) {
+      L.push('', `🧾 Bills: ${money(st.totals.invoice)} over ${plural(st.totals.nights, 'night')} — pot ${money(st.totals.pot)}, split by ranking ${money(st.totals.players)}`);
     }
     return L.join('\n');
   }
@@ -1312,8 +1691,9 @@
       const st = statsBy[p.id];
       return `<div class="prow">
         <button class="av-btn" data-action="cycleEmoji" data-id="${p.id}" aria-label="Change avatar of ${esc(p.name)}">${avatar(p.id, 'lg')}</button>
-        <span class="nm"><span class="name">${esc(p.name)}</span><small>${st ? `${plural(st.nights, 'night')} · 👑 ${st.champions} · ${ptsTxt(st.pts)} pts · ${moneyHtml(st.total, true)}` : 'No nights yet'}</small></span>
+        <span class="nm"><span class="name">${esc(p.name)}</span><small>${st ? `fair ${scoreTxt(st.rating)} · ${plural(st.nights, 'night')} · 👑 ${st.champions} · <span class="${cls(st.total)}">${moneyHtml(st.total, true)}</span>` : 'No nights yet'}</small></span>
         <span class="acts">
+          ${st ? `<button class="icon-btn" data-action="showPlayer" data-id="${p.id}" data-scope="all" aria-label="All-time numbers of ${esc(p.name)}">📊</button>` : ''}
           <button class="icon-btn" data-action="renamePlayer" data-id="${p.id}" aria-label="Rename ${esc(p.name)}">✎</button>
           <button class="icon-btn" data-action="toggleHide" data-id="${p.id}" aria-label="${p.hidden ? 'Show' : 'Hide'} ${esc(p.name)}">${p.hidden ? '↩︎' : '🙈'}</button>
           ${!st && !db.nights.some((n) => n.playerIds.includes(p.id)) ? `<button class="icon-btn" data-action="deletePlayer" data-id="${p.id}" aria-label="Delete ${esc(p.name)}">🗑</button>` : ''}
@@ -1336,6 +1716,14 @@
   }
 
   /* ---------- SETTINGS tab ---------- */
+  /** "5 € to the pot if they played up to 10 €, or 10 € if they played more" */
+  function potRuleText(s) {
+    const t = moneyHtml(s.potThreshold);
+    if (Number(s.potFeeBelow) === Number(s.potFeeAt)) {
+      return `<b>${moneyHtml(s.potFeeAt)}</b> to the pot if they played up to ${t}, or <b>${moneyHtml(s.potFeeAbove)}</b> if they played more`;
+    }
+    return `<b>${moneyHtml(s.potFeeAt)}</b> to the pot if they played ${t}, <b>${moneyHtml(s.potFeeAbove)}</b> if more, and <b>${moneyHtml(s.potFeeBelow)}</b> if less`;
+  }
   function renderSettings() {
     const s = S();
     const numField = (key, label, sub = '') => `<div class="field"><label for="f-${key}">${label}${sub ? `<small>${sub}</small>` : ''}</label>
@@ -1358,10 +1746,12 @@
           <li>Each player plays <b>${(s.quickAmounts || []).map((q) => moneyHtml(q)).join(', ')}</b> or the <b>full amount</b> (points × ${moneyHtml(s.pointValue)}).</li>
           <li><b>Points</b> only depend on your place: winner gets players × points, each next place one step less, last gets 1 × points.</li>
           <li><b>Money</b>: only the winner collects. Each player pays the winner what they played, but never more than the winner played.</li>
-          <li>The winner pays <b>${moneyHtml(s.tableFee)}</b> for the table, plus <b>${moneyHtml(s.potFeeAt)}</b> to the pot if they played ${moneyHtml(s.potThreshold)}, or <b>${moneyHtml(s.potFeeAbove)}</b> if they played more${s.potFeeBelow ? `, or ${moneyHtml(s.potFeeBelow)} if less` : ''}.</li>
-          <li>At the end, the pot is taken off the bill. The rest is paid by the lowest places (e.g. 4 players: 50 · 30 · 20 %). Ties share equally.</li>
+          <li>Only the round winner pays fees: <b>${moneyHtml(s.tableFee)}</b> for the table, plus ${potRuleText(s)}.</li>
+          <li>At the end, the pot comes off the bill — and so does what anyone paid when leaving early, and any extra money. The rest is paid by the lowest places still at the table (e.g. 4 players: 50 · 30 · 20 %). Ties share equally.</li>
           <li>Someone <b>joining late</b> can get starting points: last place's points, the table average, 0 or any number.</li>
+          <li>Someone <b>leaving early</b> keeps their points, pays what they pay when they go, and is left out of the bill split.</li>
           <li>The <b>champion</b> of the night is whoever has the most points.</li>
+          <li>The <b>fair score</b> (0–100) ranks players who played different amounts: every round counts from 100 (won) to 0 (last), bigger rounds and bigger tables count more, and everyone starts at 50 until about ${C.RATING_PRIOR} rounds are played.</li>
         </ol>
       </section>
 
@@ -1650,6 +2040,85 @@
       save();
       render();
     },
+    /* --- leaving early --- */
+    leavePlayer: async () => {
+      const night = activeNight();
+      if (!night) return;
+      const seated = seatedIds(night);
+      if (seated.length < 2) return toast('At least one player has to stay for the bill');
+      const r = await ask({
+        title: 'Who is leaving?',
+        body: `<p class="hint" style="margin:0 0 4px">They keep their points. What they pay now comes off the bill, and they are left out of the split at the end.</p>
+          <div class="pick-grid">${seated.map((id) => `<button class="ptile" data-modal-value="id:${id}">${avatar(id, 'lg')}<span class="pname">${nameOf(id)}</span></button>`).join('')}</div>`,
+        buttons: [{ label: 'Cancel', value: null }],
+      });
+      if (!r.value || !String(r.value).startsWith('id:')) return;
+      const id = String(r.value).slice(3);
+      const paid = await askNumber(`What did ${nameOf(id)} pay toward the bill?`, '', S().currency, 'This comes off the bill. Type 0 if they paid nothing.');
+      if (paid == null) return;
+      const live = activeNight();
+      if (!live || !seatedIds(live).includes(id)) return;
+      live.leaves = live.leaves || [];
+      live.leaves.push({ id: uid(), playerId: id, paid, afterRound: live.rounds.length, at: Date.now(), updatedAt: Date.now() });
+      if (ui.draft && ui.draft.nightId === live.id) ui.draft.order = ui.draft.order.filter((x) => x !== id);
+      touch(live);
+      save();
+      sfx.chip();
+      render();
+      toast(`👋 ${P(id).name} left${paid ? ` · paid ${money(paid)}` : ''}`);
+    },
+    editLeave: async (ds) => {
+      const n0 = activeNight();
+      const l0 = n0 && (n0.leaves || []).find((x) => x.id === ds.id);
+      if (!l0) return;
+      const v = await askNumber(`What did ${nameOf(l0.playerId)} pay toward the bill?`, l0.paid || 0, S().currency, 'This comes off the bill.');
+      if (v == null) return;
+      const night = activeNight();
+      const l = night && (night.leaves || []).find((x) => x.id === ds.id);
+      if (!l) return;
+      l.paid = v;
+      touch(l);
+      touch(night);
+      save();
+      render();
+    },
+    undoLeave: async (ds) => {
+      const n0 = activeNight();
+      const l0 = n0 && (n0.leaves || []).find((x) => x.id === ds.id);
+      if (!l0) return;
+      if (!(await confirmBox(`${nameOf(l0.playerId)} is back?`, 'They sit at the table again and take part in the bill split.', 'Yes, back at the table', 'primary'))) return;
+      const night = activeNight();
+      if (!night) return;
+      const gone = (night.leaves || []).filter((x) => x.playerId === l0.playerId);
+      night.leaves = (night.leaves || []).filter((x) => x.playerId !== l0.playerId);
+      gone.forEach((x) => tomb('leaves', x.id));
+      touch(night);
+      save();
+      render();
+      toast(`${P(l0.playerId).name} is back at the table 🃏`);
+    },
+    /* --- extra money toward the bill --- */
+    addExtra: async () => {
+      const night = activeNight();
+      if (!night) return;
+      const r = await ask({
+        title: 'Who paid extra?',
+        body: `<p class="hint" style="margin:0 0 4px">Extra money comes off the bill for everyone, like the pot.</p>
+          <div class="pick-grid">${night.playerIds.map((id) => `<button class="ptile" data-modal-value="id:${id}">${avatar(id, 'lg')}<span class="pname">${nameOf(id)}</span></button>`).join('')}</div>`,
+        buttons: [{ label: 'Cancel', value: null }],
+      });
+      if (!r.value || !String(r.value).startsWith('id:')) return;
+      const id = String(r.value).slice(3);
+      const v = await askNumber(`How much extra did ${nameOf(id)} pay?`, '', S().currency, 'It comes off the bill before the split.');
+      if (v == null || v <= 0) return;
+      ui.billExtras.push({ playerId: id, amount: v });
+      sfx.chip();
+      render();
+    },
+    removeExtra: (ds) => {
+      ui.billExtras.splice(Number(ds.i), 1);
+      render();
+    },
     finishNight: async () => {
       const night = activeNight();
       if (!night) return;
@@ -1665,6 +2134,7 @@
       }
       ui.billInput = '';
       ui.billTable = !!S().tableToInvoice;
+      ui.billExtras = [];
       go({ view: 'bill' });
       setTimeout(() => {
         const inp = $('#bill-input');
@@ -1678,7 +2148,11 @@
       const raw = ui.billInput.trim();
       const invoice = raw === '' ? 0 : parseNum(raw);
       if (!Number.isFinite(invoice) || invoice < 0) return toast('Type the bill amount (or 0)');
-      night.bill = { invoice: C.r2(invoice), shares: C.sharesFor(night.playerIds.length, S()), tableToInvoice: ui.billTable };
+      // the ranking split is between the players still at the table
+      const extras = ui.billExtras.filter((e) => e.amount > 0).map((e) => ({ playerId: e.playerId, amount: C.r2(e.amount) }));
+      night.bill = { invoice: C.r2(invoice), shares: C.sharesFor(seatedIds(night).length, S()), tableToInvoice: ui.billTable };
+      if (extras.length) night.bill.extras = extras;
+      ui.billExtras = [];
       night.status = 'finished';
       night.endedAt = Date.now();
       touch(night);
@@ -1733,8 +2207,40 @@
     },
     rankBy: (ds) => {
       ui.rank.by = ds.v;
+      ui.rank.sort = null;
       sfx.tap();
       render();
+    },
+    rankView: (ds) => {
+      ui.rank.view = ds.v;
+      sfx.tap();
+      render();
+    },
+    rankSort: (ds) => {
+      const s = ui.rank.sort;
+      const cur = s || { k: ui.rank.by === 'points' ? 'pts' : ui.rank.by === 'champions' ? 'champions' : 'rating', dir: -1 };
+      ui.rank.sort = cur.k === ds.k ? { k: ds.k, dir: -cur.dir } : { k: ds.k, dir: -1 };
+      sfx.tap();
+      render();
+    },
+    rankMetric: (ds) => {
+      ui.rank.metric = ds.v;
+      sfx.tap();
+      render();
+    },
+    rankFocus: (ds) => {
+      ui.rank.focus = ui.rank.focus === ds.id ? null : ds.id;
+      render();
+    },
+    openRanking: () => {
+      Object.assign(ui.rank, { type: 'month', offset: 0, view: 'board' });
+      go({ tab: 'rankings' });
+    },
+    showPlayer: (ds) => {
+      const card = playerCard(ds.id, ds.scope);
+      if (!card) return;
+      sfx.tap();
+      ask({ title: card.title, body: card.body, buttons: [{ label: 'Close', value: null, kind: 'primary' }] });
     },
     shareRanking: () => shareText(rankingText()),
 
@@ -2101,6 +2607,9 @@
             rd.order = (rd.order || []).map(remap);
             for (const res of rd.results) res.playerId = remap(res.playerId);
           }
+          for (const j of n.joins || []) j.playerId = remap(j.playerId);
+          for (const l of n.leaves || []) l.playerId = remap(l.playerId);
+          for (const e of (n.bill && n.bill.extras) || []) e.playerId = remap(e.playerId);
           db.nights.push(n);
           added++;
         }

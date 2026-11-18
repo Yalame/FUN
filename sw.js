@@ -1,6 +1,6 @@
 /* CHAMPIONS offline support: keeps the app working without internet.
    Bump VERSION when shipping a new version of the files. */
-const VERSION = 'champions-v4';
+const VERSION = 'champions-v5';
 const FONTS = 'champions-fonts';
 const SHELL = [
   './',
@@ -8,6 +8,7 @@ const SHELL = [
   './styles.css',
   './calc.js',
   './sync.js',
+  './charts.js',
   './app.js',
   './manifest.webmanifest',
   './icons/icon-192.png',

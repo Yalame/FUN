@@ -3,7 +3,7 @@
 
    How merging works when two phones have different data:
    - players and nights: the most recently changed copy wins (updatedAt)
-   - rounds and late-join entries inside a night: kept from both phones
+   - rounds, late-join and left-early entries inside a night: kept from both phones
    - anything deleted stays deleted (a "tombstone" remembers the delete time)
    - money rules (settings): the most recently changed set wins;
      look & sound stay personal to each phone */
@@ -13,15 +13,15 @@
   const FILE = 'champions-data.json';
   const SHARED_SETTINGS = [
     'currency', 'pointValue', 'stakePicks', 'quickAmounts', 'tableFee',
-    'potThreshold', 'potFeeBelow', 'potFeeAt', 'potFeeAbove', 'tableToInvoice', 'splits',
+    'potThreshold', 'potFeeBelow', 'potFeeAt', 'potFeeAbove', 'tableToInvoice', 'splits', 'rulesRev',
   ];
-  const KINDS = ['nights', 'players', 'rounds', 'joins'];
+  const KINDS = ['nights', 'players', 'rounds', 'joins', 'leaves'];
 
   const ts = (x) => Number(x && x.updatedAt) || 0;
   const newer = (x, y) => (ts(y) > ts(x) ? y : x);
 
   function emptyDeleted() {
-    return { nights: {}, players: {}, rounds: {}, joins: {} };
+    return { nights: {}, players: {}, rounds: {}, joins: {}, leaves: {} };
   }
 
   function mergeDeleted(a, b) {
@@ -54,7 +54,10 @@
     for (const id of other.playerIds || []) if (!playerIds.includes(id)) playerIds.push(id);
     const rounds = unionById(base.rounds, other.rounds, (a) => a);
     const joins = unionById(base.joins, other.joins, newer);
-    return { ...base, playerIds, rounds, joins };
+    const out = { ...base, playerIds, rounds, joins };
+    // players who left early (only when a phone has such entries, so older data stays as it was)
+    if (base.leaves || other.leaves) out.leaves = unionById(base.leaves, other.leaves, newer);
+    return out;
   }
 
   /** Combine this phone's data with the team data. Returns new data for this phone. */
@@ -78,6 +81,7 @@
         ...n,
         rounds: (n.rounds || []).filter((r) => !deleted.rounds[r.id]).sort((a, b) => (a.at || 0) - (b.at || 0)),
         joins: (n.joins || []).filter((j) => !deleted.joins[j.id]),
+        ...(n.leaves ? { leaves: n.leaves.filter((l) => !deleted.leaves[l.id]) } : {}),
       }));
 
     let settings = local.settings;
@@ -121,7 +125,7 @@
     const p = toPayload(payload);
     p.players = p.players.slice().sort(byId);
     p.nights = p.nights
-      .map((n) => ({ ...n, joins: (n.joins || []).slice().sort(byId) }))
+      .map((n) => ({ ...n, joins: (n.joins || []).slice().sort(byId), ...(n.leaves ? { leaves: n.leaves.slice().sort(byId) } : {}) }))
       .sort(byId);
     return JSON.stringify(sortKeys(p));
   }
@@ -152,6 +156,8 @@
           results: (r.results || []).map((x) => ({ ...x, playerId: re(x.playerId) })),
         })),
         joins: (n.joins || []).map((j) => ({ ...j, playerId: re(j.playerId) })),
+        ...(n.leaves ? { leaves: n.leaves.map((l) => ({ ...l, playerId: re(l.playerId) })) } : {}),
+        ...(n.bill && n.bill.extras ? { bill: { ...n.bill, extras: n.bill.extras.map((e) => ({ ...e, playerId: re(e.playerId) })) } } : {}),
       })),
     };
   }

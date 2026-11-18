@@ -71,6 +71,35 @@ test('late joiners from either phone are kept in the night', () => {
   assert.strictEqual(m.nights[0].joins[0].pts, 4);
 });
 
+test('players who left early on either phone are kept; an undone leave stays undone', () => {
+  const night = (leaves, updatedAt) => ({ id: 'n1', status: 'active', playerIds: ['p1', 'p2', 'p3'], rounds: [], joins: [], leaves, updatedAt });
+  const a = { ...base(), nights: [night([{ id: 'l1', playerId: 'p2', paid: 20, updatedAt: 5 }], 5)] };
+  const b = { ...base(), nights: [night([{ id: 'l2', playerId: 'p3', paid: 10, updatedAt: 7 }], 7)] };
+  const m = Y.mergeData(a, b);
+  assert.deepStrictEqual(m.nights[0].leaves.map((l) => l.id).sort(), ['l1', 'l2']);
+  const undone = { ...a, deleted: { ...Y.emptyDeleted(), leaves: { l1: 9 } }, nights: [night([], 9)] };
+  assert.deepStrictEqual(Y.mergeData(undone, a).nights[0].leaves, []);
+  assert.deepStrictEqual(Y.mergeData(a, undone).nights[0].leaves, []);
+});
+
+test('the newer edit of what a leaver paid wins', () => {
+  const night = (paid, t) => ({ id: 'n1', status: 'active', playerIds: ['p1'], rounds: [], joins: [], leaves: [{ id: 'l1', playerId: 'p1', paid, updatedAt: t }], updatedAt: t });
+  const m = Y.mergeData({ ...base(), nights: [night(15, 3)] }, { ...base(), nights: [night(25, 8)] });
+  assert.strictEqual(m.nights[0].leaves[0].paid, 25);
+});
+
+test('nights from before leaving-early existed are not changed by a merge', () => {
+  const a = { ...base(), nights: [{ id: 'n1', status: 'finished', playerIds: ['p1'], rounds: [round('r1', 1)], joins: [], updatedAt: 1 }] };
+  const m = Y.mergeData(a, Y.toPayload(a));
+  assert.ok(!('leaves' in m.nights[0]));
+});
+
+test('the money-rules version travels with the team settings', () => {
+  const p = Y.toPayload({ ...base(), settings: { potFeeBelow: 5, rulesRev: 2, theme: 'felt' } });
+  assert.strictEqual(p.settings.rulesRev, 2);
+  assert.strictEqual(p.settings.potFeeBelow, 5);
+});
+
 test('money rules: newer wins, but look & sound stay personal', () => {
   const a = { ...base(), settings: { tableFee: 5, theme: 'ruby', sound: false }, settingsUpdatedAt: 1 };
   const b = { ...base(), settings: { tableFee: 7, theme: 'felt', sound: true }, settingsUpdatedAt: 2 };
@@ -107,6 +136,15 @@ test('joining the team: same-name players are matched, not doubled', () => {
   assert.deepStrictEqual(m.players.map((p) => p.id).sort(), ['p1', 'x2']);
   assert.deepStrictEqual(m.nights[0].playerIds, ['p1', 'x2']);
   assert.strictEqual(m.nights[0].rounds[0].results[0].playerId, 'p1');
+});
+
+test('joining the team also maps leavers and extra bill payments to the team\'s players', () => {
+  const local = { ...base(), players: [{ id: 'x1', name: 'reza' }], nights: [{ id: 'n9', status: 'finished', playerIds: ['x1'], rounds: [], joins: [], leaves: [{ id: 'l9', playerId: 'x1', paid: 5 }], bill: { invoice: 50, extras: [{ playerId: 'x1', amount: 10 }] } }] };
+  const remote = { ...base(), players: [{ id: 'p1', name: 'Reza' }] };
+  const m = Y.adoptRemoteIds(local, remote);
+  assert.strictEqual(m.nights[0].leaves[0].playerId, 'p1');
+  assert.strictEqual(m.nights[0].bill.extras[0].playerId, 'p1');
+  assert.strictEqual(m.nights[0].bill.invoice, 50);
 });
 
 test('team link is read from a gist address', () => {
