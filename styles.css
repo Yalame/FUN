@@ -746,6 +746,37 @@ details.card[open] summary { margin-bottom: 8px; }
 .spark path { fill: none; stroke: var(--ink-3); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .spark circle { fill: var(--gold); }
 
+/* the league table (football style): # · player · P W 2nd 3rd L · Pts */
+.league { --cols: 5; margin: 0 -6px; font-variant-numeric: tabular-nums; }
+.lt-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) repeat(var(--cols), minmax(22px, auto)) 50px;
+  align-items: center;
+  column-gap: 5px;
+  width: 100%;
+  padding: 9px 6px;
+  text-align: left;
+  border-top: 1px solid var(--line);
+}
+.lt-head { border-top: 0; padding-top: 0; padding-bottom: 6px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.lt-head + .lt-row { border-top-color: rgba(255, 255, 255, 0.14); }
+.lt-row .c-rk { text-align: center; font-weight: 800; color: var(--ink-3); font-size: 13px; }
+.lt-row .c-rk.medal { font-size: 18px; }
+.lt-row .c-name { display: flex; align-items: center; gap: 7px; min-width: 0; font-weight: 750; }
+.lt-row .c-name .tname { max-width: none; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lt-row .c-name .tag { margin-left: 0; flex: none; }
+.lt-row .c-name .av.sm { width: 24px; height: 24px; font-size: 13px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85); }
+.lt-row .c-n { text-align: center; color: var(--ink-2); font-size: 14px; }
+.lt-row .c-key { text-align: right; font-weight: 800; font-size: 16px; color: var(--gold-hi); }
+.lt-head .c-n, .lt-head .c-key { font-size: 10.5px; color: var(--ink-3); }
+.lt-row.top1 { background: linear-gradient(90deg, rgba(232, 196, 104, 0.2), transparent 85%); border-radius: 12px; }
+.lt-row.top1 + .lt-row { border-top-color: transparent; }
+button.lt-row:active { background: rgba(255, 255, 255, 0.05); }
+@media (max-width: 360px) {
+  .lt-row .c-name .av { display: none; }
+  .lt-row { column-gap: 4px; }
+}
+
 /* the wide stats table: names stay put, numbers scroll sideways */
 .table-card { background: var(--panel-solid); }
 .stat-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; border-radius: 12px; }

@@ -26,11 +26,15 @@ It runs in any browser and installs on iPhone and Mac like a normal app. Works o
 9. **Extra money** — on the bill screen, *Extra money* records someone paying more; it comes off the
    bill for everyone (like the pot) and the payer still takes part in the split.
 10. **Champion** — most points of the night (a tie gives two champions).
-11. **Fair score (0–100)** — the main ranking. Each round counts from 100 (won) to 0 (last) whatever
-    the table size. Rounds are weighted: bigger stakes count more but damped (a 4-point round counts
-    double a 1-point round), and tables with more players count more (heads-up is mostly luck).
-    Weights are scaled so an average round counts 1, and everyone starts at 50 until about
-    5 average rounds are played (*new* in the ranking). One lucky night can't beat a strong month.
+11. **Fair points** — the main ranking, a league table like football that only goes up.
+    Every round adds points by finishing place: 3 for a win down to 0 for last
+    (4 players: 3 · 2 · 1 · 0). Rounds are weighted: bigger stakes count more but damped
+    (a 4-point round counts double a 1-point round), and tables with more players count more
+    (heads-up is mostly luck); weights are scaled so an average round is worth 3 for a win.
+    **Missed a night?** Every round the table played without you adds your own average per round,
+    pulled toward the group's average until you have played about 10 rounds, and never for more
+    rounds than you played. Being away doesn't drop you down, one lucky night can't fake a season,
+    and nobody climbs the table without playing. The table shows P (rounds), W, 2nd, 3rd, L (last).
 
 All numbers above can be changed in **Settings**.
 
@@ -38,12 +42,13 @@ All numbers above can be changed in **Settings**.
 
 Pick a week, month, year or all time, then:
 
-- **Ranking** — podium and leaderboard by *Fair* score, *Overall* (all points) or *Champions* (crowns),
-  with each player's fair-score trend. Tap anyone for their player card with every number.
-- **Stats** — one table with everything (fair, points, crowns, rounds, wins, win %, average finish,
-  best night, cards won/lost, fees, bills, net); names stay put while the numbers scroll sideways.
+- **Ranking** — podium and a football-style league table by *Fair* points (P · W · 2nd · 3rd · L · Pts),
+  *Overall* (game points) or *Champions* (crowns). Tap anyone for their player card with every number.
+- **Stats** — one table with everything (fair points, earned, missed-round points, P/W/2nd/3rd/L,
+  points per round, win %, average finish, game points, crowns, best night, cards won/lost, fees,
+  bills, net); names stay put while the numbers scroll sideways.
   Tap a column to sort.
-- **Curves** — how the rank, fair score, points or money moved night by night. Touch the chart to
+- **Curves** — how the league position, fair points, game points or money moved night by night. Touch the chart to
   see everyone on that night; tap a name to highlight their line; *Show the numbers* gives the table.
 - **Bills** — totals, average bill, how the bills were paid (pot, table, leaving, extra, ranking split),
   who paid what, and every night's bill.

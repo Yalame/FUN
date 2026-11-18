@@ -263,43 +263,39 @@ test('aggregate counts champion titles and points across nights', () => {
   assert.strictEqual(b.bill, 50 - 5); // B was last in night 1: pays bill minus A's 5 € pot
 });
 
-test('fair score: one good night does not beat three good nights; more play counts', () => {
-  const win = (order) => C.buildRound(1, order, {}, S);
-  // A plays 3 nights (9 rounds) and wins 6; B plays 1 night (3 rounds) and wins 2; C is always there, never wins
-  const nA = (i) => night(['A', 'C', 'D'], [win(['A', 'C', 'D']), win(['A', 'D', 'C']), win(['D', 'A', 'C'])], { date: `2026-11-0${i}` });
-  const nB = night(['B', 'C', 'D'], [win(['B', 'C', 'D']), win(['B', 'D', 'C']), win(['D', 'B', 'C'])]);
-  const st = C.sortStandings(C.aggregate([nA(1), nA(2), nA(3), nB]), 'rating');
+test('fair points work like a football table: 3 for a win … 0 for last, and they only go up', () => {
+  const one = C.aggregate([night(['A', 'B', 'C', 'D'], [C.buildRound(1, ['A', 'B', 'C', 'D'], {}, S)])]);
+  const r = Object.fromEntries(one.map((x) => [x.playerId, x]));
+  assert.deepStrictEqual(['A', 'B', 'C', 'D'].map((x) => r[x].fair), [3, 2, 1, 0]);
+  assert.strictEqual(r.A.lp, r.A.fair, 'nobody missed a round, so nothing is filled in');
+  // over a whole month, a player who is always there never goes down
+  const T = ['A', 'B', 'C', 'D'];
+  const nights = [1, 2, 3, 4].map((d) => night(T, [
+    C.buildRound(d % 3 + 1, ['B', 'A', 'D', 'C'], {}, S), C.buildRound(1, ['C', 'D', 'A', 'B'], {}, S), C.buildRound(2, ['A', 'C', 'B', 'D'], {}, S),
+  ], { id: `n${d}`, date: `2026-11-0${d}` }));
+  const steps = C.timeline(nights);
+  for (const id of T) {
+    const line = steps.map((s) => s.standings.find((x) => x.playerId === id).fair);
+    for (let i = 1; i < line.length; i++) assert.ok(line[i] >= line[i - 1], `${id} went down: ${line}`);
+  }
+});
+
+test('fair points: missing a night does not drop you down the table', () => {
+  const strong = (x, y) => [[x, y, 'C', 'D'], [y, x, 'D', 'C'], [x, y, 'D', 'C'], [y, x, 'C', 'D']];
+  const n1 = night(['A', 'B', 'C', 'D'], strong('A', 'B').map((o) => C.buildRound(1, o, {}, S)), { date: '2026-11-02' });
+  const n2 = night(['A', 'B', 'C', 'D'], strong('A', 'B').map((o) => C.buildRound(1, o, {}, S)), { date: '2026-11-09' });
+  // A can't come to the third night; B plays as well as always
+  const n3 = night(['B', 'C', 'D', 'E'], [['B', 'C', 'D', 'E'], ['C', 'B', 'E', 'D'], ['B', 'D', 'C', 'E'], ['E', 'B', 'C', 'D']].map((o) => C.buildRound(1, o, {}, S)), { date: '2026-11-16' });
+  const st = C.sortStandings(C.aggregate([n1, n2, n3]), 'fair');
   const r = Object.fromEntries(st.map((x) => [x.playerId, x]));
-  assert.strictEqual(st[0].playerId, 'A');
-  assert.ok(r.A.rating > r.B.rating, 'same win rate, more rounds ranks higher');
-  assert.ok(r.B.rating > r.C.rating);
-  assert.ok(r.A.pts > r.B.pts * 2, 'plain points would only reward showing up');
-  assert.ok(r.A.rating <= 100 && r.C.rating >= 0);
+  assert.strictEqual(r.A.roundsPlayed, 8);
+  assert.ok(r.A.fair > r.A.lp, 'missed rounds are filled in');
+  assert.ok(r.A.fair >= r.B.fair * 0.9, `A ${r.A.fair} should stay close to B ${r.B.fair}`);
+  assert.ok(r.A.fair > r.C.fair && r.A.fair > r.D.fair, 'and above the players who were there but played worse');
+  assert.strictEqual(r.A.filledRounds, 4);
 });
 
-test('fair score: a win is a full win at any table size, and a bigger table counts a bit more; no rounds = 50', () => {
-  assert.strictEqual(C.fairScore(0, 0), 50);
-  const big = night(['A', 'B', 'C', 'D', 'E', 'F'], [C.buildRound(1, ['A', 'B', 'C', 'D', 'E', 'F'], {}, S)]);
-  const small = night(['X', 'Y', 'Z'], [C.buildRound(1, ['X', 'Y', 'Z'], {}, S)]);
-  const r = Object.fromEntries(C.aggregate([big, small]).map((x) => [x.playerId, x]));
-  assert.strictEqual(r.A.avgResult, 100);
-  assert.strictEqual(r.X.avgResult, 100);
-  assert.strictEqual(r.F.avgResult, 0);
-  assert.ok(r.A.rating > r.X.rating && r.X.rating > 50, 'beating 5 players says more than beating 2');
-  assert.ok(r.F.rating < r.Z.rating && r.Z.rating < 50);
-});
-
-test('fair score: weights scale with the period, so stakes x3 change nothing', () => {
-  const mk = (pts) => [
-    night(['A', 'B', 'C', 'D'], [C.buildRound(pts, ['A', 'B', 'C', 'D'], {}, S), C.buildRound(pts, ['B', 'A', 'D', 'C'], {}, S)], { date: '2026-11-02' }),
-    night(['A', 'B', 'C'], [C.buildRound(pts, ['C', 'A', 'B'], {}, S)], { date: '2026-11-09' }),
-  ];
-  const one = Object.fromEntries(C.aggregate(mk(1)).map((x) => [x.playerId, x.rating]));
-  const three = Object.fromEntries(C.aggregate(mk(3)).map((x) => [x.playerId, x.rating]));
-  assert.deepStrictEqual(one, three);
-});
-
-test('fair score: one lucky night at high stakes does not beat a strong regular', () => {
+test('fair points: one lucky night at high stakes does not beat a strong regular', () => {
   const T = ['L', 'R', 'P', 'Q'];
   // L plays one night of three 3-point rounds and wins them all
   const lucky = night(T, [0, 1, 2].map(() => C.buildRound(3, ['L', 'R', 'P', 'Q'], {}, S)), { date: '2026-11-03' });
@@ -309,16 +305,45 @@ test('fair score: one lucky night at high stakes does not beat a strong regular'
     C.buildRound(3, ['R', 'Q', 'P', 'K'], {}, S), C.buildRound(3, ['K', 'R', 'P', 'Q'], {}, S),
     C.buildRound(3, ['R', 'K', 'Q', 'P'], {}, S),
   ], { date: d });
-  const st = C.sortStandings(C.aggregate([lucky, regular('2026-11-10'), regular('2026-11-17'), regular('2026-11-24')]), 'rating');
+  const st = C.sortStandings(C.aggregate([lucky, regular('2026-11-10'), regular('2026-11-17'), regular('2026-11-24')]), 'fair');
   const r = Object.fromEntries(st.map((x) => [x.playerId, x]));
-  assert.ok(r.R.rating > r.L.rating, `regular ${r.R.rating} should beat one lucky night ${r.L.rating}`);
+  assert.ok(r.R.fair > r.L.fair, `regular ${r.R.fair} should beat one lucky night ${r.L.fair}`);
   assert.ok(r.L.provisional && !r.R.provisional);
   assert.strictEqual(st[0].playerId, 'R');
+  assert.strictEqual(r.L.filledRounds, 3, 'never filled for more rounds than played');
 });
 
-test('fair score: a bigger stake counts more, but only by its square root', () => {
+test('fair points: a win at a bigger table is worth more; stakes x3 change nothing', () => {
+  const big = night(['A', 'B', 'C', 'D', 'E', 'F'], [C.buildRound(1, ['A', 'B', 'C', 'D', 'E', 'F'], {}, S)]);
+  const small = night(['X', 'Y', 'Z'], [C.buildRound(1, ['X', 'Y', 'Z'], {}, S)]);
+  const r = Object.fromEntries(C.aggregate([big, small]).map((x) => [x.playerId, x]));
+  assert.strictEqual(r.A.avgResult, 100);
+  assert.strictEqual(r.X.avgResult, 100);
+  assert.ok(r.A.lp > r.X.lp && r.A.fair > r.X.fair, 'beating 5 players is worth more than beating 2');
+  assert.strictEqual(r.F.lp, 0);
+  const mk = (pts) => [
+    night(['A', 'B', 'C', 'D'], [C.buildRound(pts, ['A', 'B', 'C', 'D'], {}, S), C.buildRound(pts, ['B', 'A', 'D', 'C'], {}, S)], { date: '2026-11-02' }),
+    night(['A', 'B', 'C'], [C.buildRound(pts, ['C', 'A', 'B'], {}, S)], { date: '2026-11-09' }),
+  ];
+  const one = Object.fromEntries(C.aggregate(mk(1)).map((x) => [x.playerId, x.fair]));
+  const three = Object.fromEntries(C.aggregate(mk(3)).map((x) => [x.playerId, x.fair]));
+  assert.deepStrictEqual(one, three);
+});
+
+test('fair points: a bigger stake counts more, but only by its square root', () => {
   assert.strictEqual(C.roundWeight(4, 4) / C.roundWeight(1, 4), 2);
   assert.ok(Math.abs(C.roundWeight(1, 2) / C.roundWeight(1, 4) - 5 / 9) < 1e-9, 'heads-up counts 5/9 of a 4-player round');
+  const st = C.aggregate([night(['A', 'B'], [C.buildRound(1, ['A', 'B'], {}, S), C.buildRound(4, ['B', 'A'], {}, S)])]);
+  const r = Object.fromEntries(st.map((x) => [x.playerId, x]));
+  assert.ok(r.B.fair > r.A.fair, 'winning the 4-point round beats winning the 1-point round');
+});
+
+test('positions are counted like a football table: wins, 2nds, 3rds, last places', () => {
+  const n = night(['A', 'B', 'C', 'D'], [C.buildRound(1, ['A', 'B', 'C', 'D'], {}, S), C.buildRound(1, ['A', 'C', 'B', 'D'], {}, S), C.buildRound(1, ['D', 'A'], {}, S)]);
+  const r = Object.fromEntries(C.aggregate([n]).map((x) => [x.playerId, x]));
+  assert.deepStrictEqual([r.A.roundsWon, r.A.p2, r.A.p3, r.A.plast], [2, 0, 0, 1], 'last of 2 counts as last, not 2nd');
+  assert.deepStrictEqual([r.B.roundsWon, r.B.p2, r.B.p3, r.B.plast], [0, 1, 1, 0]);
+  assert.deepStrictEqual([r.D.roundsWon, r.D.plast], [1, 2]);
 });
 
 test('curves: the last step of the timeline matches the table', () => {
@@ -331,7 +356,7 @@ test('curves: the last step of the timeline matches the table', () => {
   assert.ok(!steps[0].standings.some((x) => x.playerId === 'D'), 'D appears from the night they first played');
   const last = Object.fromEntries(steps[1].standings.map((x) => [x.playerId, x]));
   for (const a of C.aggregate(nights)) {
-    assert.strictEqual(last[a.playerId].rating, a.rating);
+    assert.strictEqual(last[a.playerId].fair, a.fair);
     assert.strictEqual(last[a.playerId].pts, a.pts);
     assert.strictEqual(last[a.playerId].total, a.total);
   }

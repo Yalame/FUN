@@ -290,17 +290,23 @@
     return billPlan(summary, night.bill).byPlayer;
   }
 
-  /* ---------- the fair score ----------
-     Every round gives each player a result from 1 (won) to 0 (last), whatever the
-     table size. Rounds are weighted:
+  /* ---------- fair points: a football-style league table ----------
+     Every round adds league points by finishing place: the winner 3, last 0,
+     the places in between evenly (4 players: 3 · 2 · 1 · 0). Rounds are weighted:
        - stake: bigger rounds count more, but damped (square root), so a 4-point
          round counts double a 1-point round, not four times;
        - table: more players = more skill, less luck. A heads-up round counts
          about half of a 4-player round, a 6-player round a bit more.
-     Weights are scaled so an average round in the period counts 1. The weighted
-     average starts at 50 and needs about RATING_PRIOR average rounds to move
-     away from it, so one lucky night can't beat a strong month. */
-  const RATING_PRIOR = 5;
+     Weights are scaled so an average round of the period counts 1 (a win = 3).
+     Points only go up, like a football table.
+     Missed rounds are filled fairly: for every round the table played without
+     you, you get your own average points per round — pulled toward the group
+     average until you have played about FILL_PRIOR rounds — but never for more
+     rounds than you played yourself. Being away doesn't drop you down the
+     table, and nobody climbs it without playing. */
+  const WIN_POINTS = 3;
+  const FILL_PRIOR = 10;
+  const r1 = (x) => Math.round(x * 10) / 10;
 
   /** How much one round says about skill (before scaling). */
   function roundWeight(points, n) {
@@ -325,29 +331,57 @@
     }
     return count && sum > 0 ? sum / count : 1;
   }
+  /** League points for one finish (before the round weight): 3 for a win … 0 for last. */
+  function leaguePoints(place, n) {
+    return WIN_POINTS * roundResult(place, n);
+  }
 
-  /** Fair score 0–100 from a player's weighted results (weights in "average rounds"). */
-  function fairScore(perfSum, weightSum) {
-    return Math.round(((perfSum + RATING_PRIOR * 0.5) / (weightSum + RATING_PRIOR)) * 1000) / 10;
+  /**
+   * Fair points of a player who earned `lp` league points over `w` weighted rounds,
+   * while the table played `held` weighted rounds in the period.
+   * groupAvg: the group's league points per weighted round.
+   */
+  function fairPoints(lp, w, held, groupAvg) {
+    const avg = (lp + FILL_PRIOR * groupAvg) / (w + FILL_PRIOR);
+    const missed = Math.max(0, held - w);
+    const filledRounds = Math.min(missed, w);
+    return { fair: lp + filledRounds * avg, filled: filledRounds * avg, missed, filledRounds, avg };
   }
 
   const playedNights = (nights) => (nights || []).filter((n) => n && n.status === 'finished' && (n.rounds || []).length);
   const byDate = (a, b) => String(a.date).localeCompare(String(b.date)) || (a.startedAt || 0) - (b.startedAt || 0);
+  const leagueSums = () => ({ lp: 0, weightSum: 0, resultSum: 0, p2: 0, p3: 0, plast: 0 });
 
-  /** Add one night's rounds to the players' fair-score sums. */
+  /** Add one night's rounds to the players' league sums. Returns the weighted rounds the table played. */
   function addRounds(night, scale, get) {
+    let held = 0;
     for (const round of night.rounds || []) {
       const n = (round.results || []).length;
+      if (n < 2) continue;
       const w = roundWeight(round.points, n) / scale;
-      for (const r of round.results || []) {
+      held += w;
+      for (const r of round.results) {
         const a = get(r.playerId);
         if (!a) continue;
-        const res = roundResult(r.place, n);
-        a.perfSum += w * res;
+        a.lp += leaguePoints(r.place, n) * w;
         a.weightSum += w;
-        a.resultSum += res;
+        a.resultSum += roundResult(r.place, n);
+        if (r.place === n) a.plast += 1;
+        else if (r.place === 2) a.p2 += 1;
+        else if (r.place === 3) a.p3 += 1;
       }
     }
+    return held;
+  }
+  /** League points per weighted round over everyone (the "average player"). */
+  function groupAverage(list) {
+    let lp = 0;
+    let w = 0;
+    for (const a of list) {
+      lp += a.lp;
+      w += a.weightSum;
+    }
+    return w > 0 ? lp / w : WIN_POINTS / 2;
   }
 
   /** Totals per player over many finished nights (for week / month / all-time). */
@@ -360,11 +394,12 @@
         per.set(id, {
           playerId: id, nights: 0, champions: 0, pts: 0, won: 0, lost: 0, fees: 0, potFees: 0, tableFees: 0,
           bill: 0, billShare: 0, billExtra: 0, billLeft: 0, billNights: 0, billMax: 0, leftEarly: 0,
-          roundsWon: 0, roundsPlayed: 0, bestNight: null, perfSum: 0, weightSum: 0, resultSum: 0, lastDate: '',
+          roundsWon: 0, roundsPlayed: 0, bestNight: null, lastDate: '', ...leagueSums(),
         });
       }
       return per.get(id);
     };
+    let held = 0;
     for (const night of list) {
       const sum = nightSummary(night);
       const plan = night.bill ? billPlan(sum, night.bill) : null;
@@ -396,10 +431,12 @@
           }
         }
       }
-      addRounds(night, scale, (id) => per.get(id));
+      held += addRounds(night, scale, (id) => per.get(id));
     }
+    const groupAvg = groupAverage([...per.values()]);
     return [...per.values()].map((a) => {
       const money = r2(a.won - a.lost);
+      const f = fairPoints(a.lp, a.weightSum, held, groupAvg);
       return {
         ...a,
         pts: r2(a.pts),
@@ -418,23 +455,29 @@
         avgPts: a.nights ? r2(a.pts / a.nights) : 0,
         winRate: a.roundsPlayed ? a.roundsWon / a.roundsPlayed : 0,
         avgResult: a.roundsPlayed ? Math.round((a.resultSum / a.roundsPlayed) * 1000) / 10 : 50,
-        rating: fairScore(a.perfSum, a.weightSum),
-        evidence: Math.round(a.weightSum * 10) / 10, // how many "average rounds" the score rests on
-        provisional: a.weightSum < RATING_PRIOR,
+        lp: r1(a.lp), // league points earned in the rounds played
+        fair: r1(f.fair), // + fair points for missed rounds = the table
+        filled: r1(f.filled),
+        missedRounds: Math.round(f.missed), // about how many average rounds the table played without them
+        filledRounds: Math.round(f.filledRounds),
+        perRound: Math.round(f.avg * 100) / 100, // the average used to fill missed rounds
+        ppr: a.weightSum ? Math.round((a.lp / a.weightSum) * 100) / 100 : 0, // plain league points per round
+        evidence: r1(a.weightSum), // how many "average rounds" they played
+        provisional: a.weightSum < FILL_PRIOR,
       };
     });
   }
 
-  /** Sort standings by fair score, points or champion titles; ties share a rank. */
+  /** Sort standings by fair points, game points or champion titles; ties share a rank. */
   function sortStandings(list, by) {
     const sorted = list.slice();
-    if (by === 'rating') {
-      sorted.sort((a, b) => b.rating - a.rating || (b.evidence || 0) - (a.evidence || 0) || b.pts - a.pts || b.champions - a.champions);
-      return assignRanks(sorted, (p) => p.rating);
+    if (by === 'fair' || by === 'rating') {
+      sorted.sort((a, b) => b.fair - a.fair || (b.roundsWon || 0) - (a.roundsWon || 0) || (b.lp || 0) - (a.lp || 0) || b.champions - a.champions);
+      return assignRanks(sorted, (p) => p.fair);
     }
     if (by === 'champions') {
-      sorted.sort((a, b) => b.champions - a.champions || (b.rating || 0) - (a.rating || 0) || b.pts - a.pts);
-      return assignRanks(sorted, (p) => `${p.champions}|${p.rating}`);
+      sorted.sort((a, b) => b.champions - a.champions || (b.fair || 0) - (a.fair || 0) || b.pts - a.pts);
+      return assignRanks(sorted, (p) => `${p.champions}|${p.fair}`);
     }
     sorted.sort((a, b) => b.pts - a.pts || b.champions - a.champions || (b.money || 0) - (a.money || 0));
     return assignRanks(sorted, (p) => p.pts);
@@ -443,34 +486,38 @@
   /**
    * The standings after each night, oldest first — for the ranking curves.
    * Uses the same scale as aggregate(nights), so the last step matches the table.
-   * [{ nightId, date, played: [ids], standings: [{ playerId, rating, rank, pts, total, champions }] }]
+   * [{ nightId, date, played: [ids], standings: [{ playerId, fair, rank, lp, pts, total, champions }] }]
    */
   function timeline(nights) {
     const list = playedNights(nights).slice().sort(byDate);
     const scale = meanWeight(list);
     const acc = new Map();
     const steps = [];
+    let held = 0;
     for (const night of list) {
       const sum = nightSummary(night);
       const plan = night.bill ? billPlan(sum, night.bill) : null;
       for (const p of sum.players) {
-        if (!acc.has(p.playerId)) acc.set(p.playerId, { playerId: p.playerId, pts: 0, total: 0, champions: 0, perfSum: 0, weightSum: 0, resultSum: 0 });
+        if (!acc.has(p.playerId)) acc.set(p.playerId, { playerId: p.playerId, pts: 0, total: 0, champions: 0, roundsWon: 0, ...leagueSums() });
         const a = acc.get(p.playerId);
         a.pts += p.pts;
         a.total += p.net - (plan ? plan.byPlayer[p.playerId] || 0 : 0);
+        a.roundsWon += p.roundsWon;
         if (sum.champions.includes(p.playerId)) a.champions += 1;
       }
-      addRounds(night, scale, (id) => acc.get(id));
+      held += addRounds(night, scale, (id) => acc.get(id));
+      const groupAvg = groupAverage([...acc.values()]);
       const standings = [...acc.values()].map((a) => ({
         playerId: a.playerId,
-        rating: fairScore(a.perfSum, a.weightSum),
-        evidence: Math.round(a.weightSum * 10) / 10,
+        fair: r1(fairPoints(a.lp, a.weightSum, held, groupAvg).fair),
+        lp: r1(a.lp),
         pts: r2(a.pts),
         total: r2(a.total),
         money: 0,
         champions: a.champions,
+        roundsWon: a.roundsWon,
       }));
-      steps.push({ nightId: night.id, date: night.date, played: sum.players.map((p) => p.playerId), standings: sortStandings(standings, 'rating') });
+      steps.push({ nightId: night.id, date: night.date, played: sum.players.map((p) => p.playerId), standings: sortStandings(standings, 'fair') });
     }
     return steps;
   }
@@ -566,8 +613,8 @@
 
   const Calc = {
     r2, DEFAULT_SETTINGS, DEFAULT_SPLITS, RULES_REV, upgradeRules, potFee, fullAmount, buildRound, leavesBy, nightSummary,
-    sharesFor, billPlan, billByPlayer, roundWeight, roundResult, meanWeight, fairScore, RATING_PRIOR, aggregate,
-    sortStandings, timeline, billStats, isoDate, periodRange, inRange,
+    sharesFor, billPlan, billByPlayer, roundWeight, roundResult, meanWeight, leaguePoints, fairPoints, WIN_POINTS, FILL_PRIOR,
+    aggregate, sortStandings, timeline, billStats, isoDate, periodRange, inRange,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Calc;
   else root.Calc = Calc;

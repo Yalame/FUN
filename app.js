@@ -5,7 +5,7 @@
   const Y = window.SyncLib;
   const K = window.Charts;
   const KEY = 'champions.v1';
-  const APP_VERSION = '2.0';
+  const APP_VERSION = '2.1';
   const EMOJIS = ['🦁', '🐯', '🦊', '🐺', '🦅', '🐻', '🐼', '🦈', '🐙', '🦄', '🐲', '🦖', '🐸', '🐵', '🦉', '🐝', '🦂', '🐊', '🦬', '🐆', '🦩', '🐧', '🐳', '🦍', '🐗', '🦓', '🐍', '🦚'];
   const CHIP_COLORS = ['#e23b3b', '#2f6fe0', '#1f9d55', '#222226', '#8e44ad', '#e67e22', '#c99a06'];
   const THEMES = {
@@ -176,7 +176,7 @@
   const fmtDate = (iso) => DATE_FMT.format(toDate(iso));
   const pctTxt = (x) => `${Math.round(x * 10) / 10}%`;
   const pct0 = (x) => `${Math.round(x * 100)}%`;
-  const scoreTxt = (v) => (Math.round((Number(v) || 0) * 10) / 10).toFixed(1);
+  const fairTxt = (v) => (Math.round((Number(v) || 0) * 10) / 10).toFixed(1); // fair points, one decimal
   /** Money without the currency sign, for table columns that say the currency in the header. */
   function moneyNum(v, signed = false) {
     v = C.r2(v);
@@ -210,7 +210,7 @@
     reportId: null,
     historyId: null,
     // rankings: period, ranking kind, sub-view (board | table | curves | bills), table sort, curve metric, highlighted player
-    rank: { type: 'month', offset: 0, by: 'rating', view: 'board', sort: null, metric: 'rank', focus: null },
+    rank: { type: 'month', offset: 0, by: 'fair', view: 'board', sort: null, metric: 'rank', focus: null },
     billInput: '',
     billTable: false,
     billExtras: [], // [{ playerId, amount }] extra money toward tonight's bill
@@ -897,9 +897,9 @@
           <button class="row" data-action="showPlayer" data-id="${p.playerId}" data-scope="month">
             <span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>
             ${avatar(p.playerId)}
-            <span class="nm"><span class="name">${nameOf(p.playerId)}${p.provisional ? '<i class="tag">new</i>' : ''}</span><small>${plural(p.nights, 'night')} · ${ptsTxt(p.pts)} pts · <span class="${cls(p.total)}">${moneyHtml(p.total, true)}</span></small></span>
+            <span class="nm"><span class="name">${nameOf(p.playerId)}${p.provisional ? '<i class="tag">new</i>' : ''}</span><small>${plural(p.roundsPlayed, 'round')} · ${plural(p.roundsWon, 'win')} · <span class="${cls(p.total)}">${moneyHtml(p.total, true)}</span></small></span>
             <span class="crowns" title="Champion nights">${p.champions ? `👑${p.champions}` : ''}</span>
-            <span class="score">${scoreTxt(p.rating)}<small>fair</small></span>
+            <span class="score">${fairTxt(p.fair)}<small>fair pts</small></span>
           </button>`).join('')}</div>` : `<div class="empty"><span class="big">🂡</span>No finished nights this month yet.<br>Start one and crown a champion!</div>`}
       </section>
 
@@ -913,7 +913,7 @@
 
   function monthStandings() {
     const range = C.periodRange('month', 0);
-    return C.sortStandings(C.aggregate(finishedNights().filter((n) => C.inRange(n.date, range))), 'rating');
+    return C.sortStandings(C.aggregate(finishedNights().filter((n) => C.inRange(n.date, range))), 'fair');
   }
 
   /* ---------- new night setup ---------- */
@@ -1342,23 +1342,25 @@
     return `${DAYMON_FMT.format(range.startDate)} – ${DAYMONYEAR_FMT.format(endIncl)}`;
   }
   const RANK_KINDS = [
-    ['rating', 'Fair', 'fair score'],
-    ['points', 'Overall', 'total points'],
+    ['fair', 'Fair', 'fair points'],
+    ['points', 'Overall', 'game points'],
     ['champions', 'Champions', 'crowns'],
   ];
   const RANK_HINT = {
-    rating: `<b>Fair score (0–100)</b> — every round scores 100 for 1st down to 0 for last, whatever the table size. Rounds count more when more is at stake (a 4-point round counts double a 1-point round) and when more players sit at the table (less luck than heads-up). Everyone starts at 50 until about ${C.RATING_PRIOR} rounds are played — <i class="tag">new</i> marks players still below that — so one lucky night can't beat a strong month.`,
-    points: '<b>Overall</b> — all points added up, start points included. It rewards playing a lot as much as playing well; the Fair score compares players who played different amounts.',
-    champions: '<b>Champions</b> — nights won (most points of the night; a tie crowns both). The same number of crowns is split by fair score.',
+    fair: '<b>Fair points</b> work like a football table and only go up: every round gives <b>3</b> for a win down to <b>0</b> for last (4 players: 3 · 2 · 1 · 0). Bigger stakes count more (a 4-point round counts double a 1-point round), and so do bigger tables (less luck than heads-up). P = rounds played · W = wins · L = last places.',
+    fair2: `<b>Missed a night?</b> Every round the table played without you adds your own average per round — pulled toward the group's until you have played about ${C.FILL_PRIOR} rounds, and never for more rounds than you played. Being away doesn't drop you down, and nobody climbs without playing. <i class="tag">new</i> = fewer than ${C.FILL_PRIOR} rounds so far.`,
+    points: '<b>Overall</b> — all game points added up (the points of the nights, start points included). It rewards playing a lot as much as playing well; Fair points are fair to whoever missed a night.',
+    champions: '<b>Champions</b> — nights won (most points of the night; a tie crowns both). The same number of crowns is split by fair points.',
   };
+  const kindOf = () => (ui.rank.by === 'points' || ui.rank.by === 'champions' ? ui.rank.by : 'fair');
 
   /** The nights and standings of a period: the one picked in Rankings, or 'month' / 'all'. */
   function rankingData(scope) {
-    const { type, offset, by } = ui.rank;
+    const { type, offset } = ui.rank;
     const range = scope === 'month' ? C.periodRange('month', 0) : scope === 'all' ? C.periodRange('all', 0) : C.periodRange(type, offset);
     const nights = finishedNights().filter((n) => C.inRange(n.date, range));
     const all = C.aggregate(nights);
-    return { range, nights, all, list: C.sortStandings(all, by) };
+    return { range, nights, all, list: C.sortStandings(all, kindOf()) };
   }
   /** One color per player for the curves: the 8 most active players (all time) get the hues, in a fixed order. */
   function playerColors() {
@@ -1372,13 +1374,13 @@
     for (const p of db.players) if (!seen.has(p.id)) order.push(p.id);
     return K.colorMap(order);
   }
-  /** Fair score after each night, per player (sparklines, player card). */
-  function ratingTrends(steps) {
+  /** Fair points after each night, per player (player card). */
+  function fairTrends(steps) {
     const out = {};
     steps.forEach((s, i) => {
       for (const x of s.standings) {
         if (!out[x.playerId]) out[x.playerId] = new Array(steps.length).fill(null);
-        out[x.playerId][i] = x.rating;
+        out[x.playerId][i] = x.fair;
       }
     });
     return out;
@@ -1409,15 +1411,10 @@
       ${body}`;
   }
 
-  /* --- ranking: podium + leaderboard --- */
+  /* --- ranking: podium + a football-style league table --- */
   function boardView({ nights, list }) {
-    const by = ui.rank.by;
-    const steps = C.timeline(nights);
-    const trends = ratingTrends(steps);
-    const flat = Object.values(trends).flat().filter((v) => v != null);
-    const lo = Math.min(...flat);
-    const hi = Math.max(...flat);
-    const metric = (p) => (by === 'rating' ? [scoreTxt(p.rating), 'fair'] : by === 'points' ? [ptsTxt(p.pts), 'pts'] : [String(p.champions), p.champions === 1 ? 'crown' : 'crowns']);
+    const by = kindOf();
+    const metric = (p) => (by === 'fair' ? [fairTxt(p.fair), 'pts'] : by === 'points' ? [ptsTxt(p.pts), 'pts'] : [String(p.champions), p.champions === 1 ? 'crown' : 'crowns']);
     const pod = (p, place) => {
       if (!p) return '<div class="pod pod-none" aria-hidden="true"></div>';
       const [v, u] = metric(p);
@@ -1429,52 +1426,64 @@
         <span class="pod-step"><span>${p.rank}</span></span>
       </button>`;
     };
-    const rows = list.map((p) => {
-      const [v, u] = metric(p);
-      const sub = by === 'rating' ? `${p.roundsWon}/${p.roundsPlayed} won` : `fair ${scoreTxt(p.rating)}`;
-      const spark = steps.length > 1 ? K.sparkline(trends[p.playerId] || [], { min: lo, max: hi }) : '';
-      return `<button class="lb-row ${p.rank === 1 ? 'top1' : ''}" data-action="showPlayer" data-id="${p.playerId}">
-        <span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>
-        ${avatar(p.playerId)}
-        <span class="nm"><span class="name">${nameOf(p.playerId)}${by !== 'champions' && p.champions ? `<i class="crown-tag">👑${p.champions}</i>` : ''}${by === 'rating' && p.provisional ? '<i class="tag">new</i>' : ''}</span>
-          <small>${sub} · <span class="${cls(p.total)}">${moneyHtml(p.total, true)}</span></small></span>
-        ${spark ? `<span class="trend" title="Fair score, night by night">${spark}</span>` : ''}
-        <span class="score">${v}<small>${u}</small></span>
-      </button>`;
-    }).join('');
+    const cols = {
+      fair: [['P', 'rounds played', (p) => p.roundsPlayed], ['W', 'wins (1st)', (p) => p.roundsWon], ['2nd', '2nd places', (p) => p.p2], ['3rd', '3rd places', (p) => p.p3], ['L', 'last places', (p) => p.plast]],
+      points: [['N', 'nights', (p) => p.nights], ['P', 'rounds played', (p) => p.roundsPlayed], ['W', 'wins (1st)', (p) => p.roundsWon], ['👑', 'crowns', (p) => p.champions]],
+      champions: [['N', 'nights', (p) => p.nights], ['W', 'wins (1st)', (p) => p.roundsWon], ['Fair', 'fair points', (p) => fairTxt(p.fair)]],
+    }[by];
+    const keyHead = { fair: 'Pts', points: 'Pts', champions: '👑' }[by];
+    const table = `<div class="league" style="--cols:${cols.length}">
+        <div class="lt-row lt-head" aria-hidden="true"><span class="c-rk">#</span><span class="c-name">Player</span>${cols.map(([h, t]) => `<span class="c-n" title="${t}">${h}</span>`).join('')}<span class="c-key">${keyHead}</span></div>
+        ${list.map((p) => {
+          const [v, u] = metric(p);
+          return `<button class="lt-row ${p.rank === 1 ? 'top1' : ''}" data-action="showPlayer" data-id="${p.playerId}" aria-label="${ordinal(p.rank)}: ${nameOf(p.playerId)}, ${v} ${u}, ${plural(p.roundsPlayed, 'round')}">
+            <span class="c-rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>
+            <span class="c-name">${avatar(p.playerId, 'sm')}<span class="tname">${nameOf(p.playerId)}</span>${by === 'fair' && p.provisional ? '<i class="tag">new</i>' : ''}</span>
+            ${cols.map(([, , f]) => `<span class="c-n">${f(p)}</span>`).join('')}
+            <span class="c-key">${v}</span>
+          </button>`;
+        }).join('')}
+      </div>`;
     return `
       <div class="segbar kinds">${RANK_KINDS.map(([k, l]) => `<button class="${by === k ? 'on' : ''}" data-action="rankBy" data-v="${k}" aria-pressed="${by === k}">${l}</button>`).join('')}</div>
       ${list.length > 1 ? `<div class="podium">${pod(list[1], 2)}${pod(list[0], 1)}${pod(list[2], 3)}</div>` : ''}
       <section class="card board-card">
-        <div class="card-head"><h3>${plural(nights.length, 'night')} · ${plural(list.length, 'player')}</h3>${steps.length > 1 ? '<span class="muted">line = fair score trend</span>' : ''}</div>
-        ${rows}
+        <div class="card-head"><h3>${by === 'fair' ? 'League table' : by === 'points' ? 'Overall' : 'Champions'}</h3><span class="muted">${plural(nights.length, 'night')}</span></div>
+        ${table}
         <p class="hint">${RANK_HINT[by]}</p>
-        <p class="hint">Money is overall: cards won − lost, table &amp; pot fees and the bills. Tap a player for all their numbers.</p>
+        ${by === 'fair' ? `<p class="hint">${RANK_HINT.fair2}</p>` : ''}
+        <p class="hint">Tap a player for all their numbers.</p>
       </section>
       <button class="primary" data-action="shareRanking">📤 Share this ranking</button>`;
   }
 
   /* --- stats: one wide table, sticky names, sortable --- */
   const STAT_COLS = [
-    { k: 'rating', h: 'Fair', f: (p) => scoreTxt(p.rating) },
-    { k: 'pts', h: 'Pts', f: (p) => ptsTxt(p.pts) },
-    { k: 'champions', h: '👑', f: (p) => p.champions || '·' },
-    { k: 'nights', h: 'Nights', f: (p) => p.nights },
-    { k: 'roundsPlayed', h: 'Rounds', f: (p) => p.roundsPlayed },
-    { k: 'roundsWon', h: 'Wins', f: (p) => p.roundsWon },
+    { k: 'fair', h: 'Fair pts', f: (p) => fairTxt(p.fair) },
+    { k: 'lp', h: 'Earned', f: (p) => fairTxt(p.lp) },
+    { k: 'filled', h: 'Missed +', f: (p) => (p.filled ? `+${fairTxt(p.filled)}` : '·') },
+    { k: 'roundsPlayed', h: 'P', f: (p) => p.roundsPlayed },
+    { k: 'roundsWon', h: 'W', f: (p) => p.roundsWon },
+    { k: 'p2', h: '2nd', f: (p) => p.p2 },
+    { k: 'p3', h: '3rd', f: (p) => p.p3 },
+    { k: 'plast', h: 'L', f: (p) => p.plast },
+    { k: 'ppr', h: 'Pts / round', f: (p) => p.ppr.toFixed(2) },
     { k: 'winRate', h: 'Win %', f: (p) => pct0(p.winRate) },
     { k: 'avgResult', h: 'Avg finish', f: (p) => Math.round(p.avgResult) },
-    { k: 'avgPts', h: 'Pts / night', f: (p) => ptsTxt(p.avgPts) },
+    { k: 'pts', h: 'Game pts', f: (p) => ptsTxt(p.pts) },
+    { k: 'champions', h: '👑', f: (p) => p.champions || '·' },
+    { k: 'nights', h: 'Nights', f: (p) => p.nights },
     { k: 'bestNight', h: 'Best night', f: (p) => ptsTxt(p.bestNight || 0) },
     { k: 'money', h: 'Cards', cur: true, f: (p) => moneyNum(p.money, true), c: (p) => cls(p.money) },
     { k: 'fees', h: 'Fees', cur: true, f: (p) => moneyNum(-p.fees), c: (p) => (p.fees ? 'neg' : 'zero') },
     { k: 'bill', h: 'Bills', cur: true, f: (p) => moneyNum(-p.bill), c: (p) => (p.bill ? 'neg' : 'zero') },
     { k: 'total', h: 'Net', cur: true, f: (p) => moneyNum(p.total, true), c: (p) => cls(p.total) },
   ];
+  const defaultSort = () => ({ k: { points: 'pts', champions: 'champions' }[kindOf()] || 'fair', dir: -1 });
   function statsView({ range, all }) {
-    const sort = ui.rank.sort || { k: ui.rank.by === 'points' ? 'pts' : ui.rank.by === 'champions' ? 'champions' : 'rating', dir: -1 };
+    const sort = ui.rank.sort || defaultSort();
     const val = (p) => Number(p[sort.k]) || 0;
-    const rows = all.slice().sort((a, b) => (val(a) - val(b)) * sort.dir || b.rating - a.rating);
+    const rows = all.slice().sort((a, b) => (val(a) - val(b)) * sort.dir || b.fair - a.fair);
     const cur = esc(S().currency);
     return `
       <section class="card table-card">
@@ -1493,21 +1502,21 @@
           </table>
         </div>
         <ul class="col-help">
-          <li><b>Fair</b> fair score 0–100</li>
-          <li><b>Avg finish</b> average round result — 100 = always 1st, 0 = always last</li>
-          <li><b>Cards</b> money won − lost in the rounds</li>
-          <li><b>Fees</b> table + pot paid as round winner</li>
-          <li><b>Bills</b> paid toward bills: share, extra, when leaving</li>
-          <li><b>Net</b> cards − fees − bills</li>
+          <li><b>Fair pts</b> the league table: earned + missed rounds filled at their average</li>
+          <li><b>Earned</b> league points from the rounds played (3 for a win … 0 for last, weighted)</li>
+          <li><b>P · W · 2nd · 3rd · L</b> rounds played, wins, 2nd and 3rd places, last places</li>
+          <li><b>Avg finish</b> 100 = always 1st, 0 = always last</li>
+          <li><b>Game pts</b> the points of the nights (they decide each night's champion)</li>
+          <li><b>Cards</b> money won − lost · <b>Fees</b> table + pot as winner · <b>Bills</b> share, extra, when leaving · <b>Net</b> all of it</li>
         </ul>
       </section>`;
   }
 
-  /* --- curves: how the ranking moved, night by night --- */
+  /* --- curves: how the table moved, night by night --- */
   const CURVES = {
-    rank: { label: 'Rank', title: 'Ranking after each night', sub: 'Position by fair score — #1 is the top.' },
-    rating: { label: 'Fair score', title: 'Fair score after each night', sub: '0–100 · everyone starts at 50.' },
-    pts: { label: 'Points', title: 'Points added up, night by night', sub: 'All points so far, start points included.' },
+    rank: { label: 'Position', title: 'League position after each night', sub: 'Position by fair points — #1 is the top.' },
+    fair: { label: 'Fair pts', title: 'Fair points, night by night', sub: 'Like a football table: every round adds points, missed rounds are filled fairly.' },
+    pts: { label: 'Game pts', title: 'Game points added up, night by night', sub: 'All points of the nights, start points included.' },
     total: { label: 'Money', title: 'Money overall, night by night', sub: 'Cards won − lost − fees − bills, added up.' },
   };
   function curvesView({ nights, list }) {
@@ -1515,7 +1524,7 @@
     const def = CURVES[m];
     const steps = C.timeline(nights);
     const colors = playerColors();
-    const pick = (x) => (m === 'rank' ? x.rank : m === 'rating' ? x.rating : m === 'pts' ? x.pts : x.total);
+    const pick = (x) => (m === 'rank' ? x.rank : m === 'fair' ? x.fair : m === 'pts' ? x.pts : x.total);
     const series = list.map((p) => ({
       id: p.playerId,
       name: P(p.playerId).name,
@@ -1525,7 +1534,7 @@
         return x ? pick(x) : null;
       }),
     }));
-    const valueTxt = m === 'total' ? (v) => money(v, true) : m === 'rating' ? (v) => scoreTxt(v) : m === 'rank' ? (v) => `#${v}` : (v) => ptsTxt(v);
+    const valueTxt = m === 'total' ? (v) => money(v, true) : m === 'fair' ? (v) => fairTxt(v) : m === 'rank' ? (v) => `#${v}` : (v) => ptsTxt(v);
     const labels = steps.map((s) => DAYMON_FMT.format(toDate(s.date)));
     const focus = series.some((s) => s.id === ui.rank.focus) ? ui.rank.focus : null;
     chartJobs.curves = {
@@ -1533,10 +1542,10 @@
       titles: steps.map((s) => fmtDate(s.date)),
       series,
       focus,
-      format: m === 'total' ? (v) => moneyNum(v, true) : m === 'rating' ? (v) => String(Math.round(v)) : (v) => ptsTxt(v),
+      format: m === 'total' ? (v) => moneyNum(v, true) : (v) => ptsTxt(Math.round(v)),
       tipFormat: valueTxt,
       invert: m === 'rank',
-      zero: m === 'pts' || m === 'total',
+      zero: m !== 'rank',
       height: 260,
       label: `${def.title}, ${plural(steps.length, 'night')}`,
       emptyText: 'No nights in this period yet.',
@@ -1601,21 +1610,24 @@
       </section>`;
   }
 
-  /** A player's card: every number of the period, plus their fair-score curve. */
+  /** A player's card: every number of the period, plus their fair-points curve. */
   function playerCard(id, scope) {
     const data = rankingData(scope);
     const p = data.all.find((x) => x.playerId === id);
     if (!p) return null;
-    const fair = C.sortStandings(data.all, 'rating').find((x) => x.playerId === id);
+    const fair = C.sortStandings(data.all, 'fair').find((x) => x.playerId === id);
     const steps = C.timeline(data.nights);
-    const trend = ratingTrends(steps)[id] || [];
+    const trend = fairTrends(steps)[id] || [];
     const spark = steps.length > 1 ? K.sparkline(trend, { width: 280, height: 56 }) : '';
     const tiles = [
-      ['Fair score', scoreTxt(p.rating), `#${fair.rank} of ${data.all.length}${p.provisional ? ' · new' : ''}`],
-      ['Points', ptsTxt(p.pts), `${ptsTxt(p.avgPts)} a night`],
+      ['Fair points', fairTxt(p.fair), `#${fair.rank} of ${data.all.length} in the table${p.provisional ? ' · new' : ''}`],
+      ['Earned + missed', `${fairTxt(p.lp)} + ${fairTxt(p.filled)}`, !p.filledRounds ? 'played every round'
+        : p.missedRounds > p.filledRounds ? `${p.filledRounds} of ${p.missedRounds} missed rounds filled at ${p.perRound.toFixed(2)} (up to rounds played)`
+          : `${plural(p.filledRounds, 'missed round')} filled at ${p.perRound.toFixed(2)}`],
+      ['Rounds', `P ${p.roundsPlayed} · W ${p.roundsWon}`, `2nd ${p.p2} · 3rd ${p.p3} · last ${p.plast}`],
+      ['Per round', p.ppr.toFixed(2), `win ${pct0(p.winRate)} · avg finish ${Math.round(p.avgResult)}`],
+      ['Game points', ptsTxt(p.pts), `${ptsTxt(p.avgPts)} a night`],
       ['Crowns', `👑 ${p.champions}`, plural(p.nights, 'night')],
-      ['Rounds won', `${p.roundsWon}/${p.roundsPlayed}`, pct0(p.winRate)],
-      ['Avg finish', String(Math.round(p.avgResult)), '100 = always 1st'],
       ['Best night', `${ptsTxt(p.bestNight || 0)} pts`, p.leftEarly ? `left early ${p.leftEarly}×` : ''],
       ['Cards', money(p.money, true), `won ${money(p.won)} · lost ${money(p.lost)}`],
       ['Fees', money(p.fees), `pot ${money(p.potFees)} · table ${money(p.tableFees)}`],
@@ -1625,24 +1637,24 @@
     return {
       title: `${avatar(id, 'lg')}<span class="pc-name">${nameOf(id)}</span>`,
       body: `<p class="pc-period">${esc(periodLabel(data.range))} · ${plural(p.nights, 'night')}</p>
-        ${spark ? `<div class="pc-spark">${spark}<small>fair score, night by night</small></div>` : ''}
+        ${spark ? `<div class="pc-spark">${spark}<small>fair points, night by night</small></div>` : ''}
         <div class="ptiles">${tiles.map(([l, v, s]) => `<div class="${l === 'Overall' ? cls(p.total) : ''}"><small>${l}</small><b>${esc(v)}</b>${s ? `<span>${esc(s)}</span>` : ''}</div>`).join('')}</div>`,
     };
   }
 
   function rankingText() {
     const { range, nights, all } = rankingData();
-    const by = ui.rank.by;
+    const by = kindOf();
     const list = C.sortStandings(all, by);
     const kind = RANK_KINDS.find(([k]) => k === by);
-    const L = [`🏆 CHAMPIONS — ${periodLabel(range)}`, `${plural(nights.length, 'night')} played · ranked by ${kind ? kind[2] : 'fair score'}`, ''];
-    const fair = C.sortStandings(all, 'rating')[0];
+    const L = [`🏆 CHAMPIONS — ${periodLabel(range)}`, `${plural(nights.length, 'night')} played · ranked by ${kind ? kind[2] : 'fair points'}`, ''];
+    const fair = C.sortStandings(all, 'fair')[0];
     const crowns = C.sortStandings(all, 'champions')[0];
-    if (fair) L.push(`⚖️ Best fair score: ${P(fair.playerId).name} (${scoreTxt(fair.rating)})`);
+    if (fair) L.push(`⚖️ Top of the table: ${P(fair.playerId).name} (${fairTxt(fair.fair)} fair pts)`);
     if (crowns && crowns.champions) L.push(`👑 Most crowns: ${P(crowns.playerId).name} (${crowns.champions}×)`);
     L.push('');
     for (const p of list) {
-      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — fair ${scoreTxt(p.rating)} · ${ptsTxt(p.pts)} pts · 👑${p.champions} · ${money(p.total, true)} (${plural(p.nights, 'night')}, ${plural(p.roundsPlayed, 'round')})`);
+      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — ${fairTxt(p.fair)} fair pts · P ${p.roundsPlayed} W ${p.roundsWon} L ${p.plast} · 👑${p.champions} · ${money(p.total, true)}`);
     }
     const st = C.billStats(nights);
     if (st.totals.nights) {
@@ -1691,7 +1703,7 @@
       const st = statsBy[p.id];
       return `<div class="prow">
         <button class="av-btn" data-action="cycleEmoji" data-id="${p.id}" aria-label="Change avatar of ${esc(p.name)}">${avatar(p.id, 'lg')}</button>
-        <span class="nm"><span class="name">${esc(p.name)}</span><small>${st ? `fair ${scoreTxt(st.rating)} · ${plural(st.nights, 'night')} · 👑 ${st.champions} · <span class="${cls(st.total)}">${moneyHtml(st.total, true)}</span>` : 'No nights yet'}</small></span>
+        <span class="nm"><span class="name">${esc(p.name)}</span><small>${st ? `${fairTxt(st.fair)} fair pts · ${plural(st.nights, 'night')} · 👑 ${st.champions} · <span class="${cls(st.total)}">${moneyHtml(st.total, true)}</span>` : 'No nights yet'}</small></span>
         <span class="acts">
           ${st ? `<button class="icon-btn" data-action="showPlayer" data-id="${p.id}" data-scope="all" aria-label="All-time numbers of ${esc(p.name)}">📊</button>` : ''}
           <button class="icon-btn" data-action="renamePlayer" data-id="${p.id}" aria-label="Rename ${esc(p.name)}">✎</button>
@@ -1751,7 +1763,7 @@
           <li>Someone <b>joining late</b> can get starting points: last place's points, the table average, 0 or any number.</li>
           <li>Someone <b>leaving early</b> keeps their points, pays what they pay when they go, and is left out of the bill split.</li>
           <li>The <b>champion</b> of the night is whoever has the most points.</li>
-          <li>The <b>fair score</b> (0–100) ranks players who played different amounts: every round counts from 100 (won) to 0 (last), bigger rounds and bigger tables count more, and everyone starts at 50 until about ${C.RATING_PRIOR} rounds are played.</li>
+          <li><b>Fair points</b> make the league table, like football: every round adds 3 for a win down to 0 for last, bigger stakes and bigger tables count more, and rounds you missed are filled with your own average (pulled toward the group's until about ${C.FILL_PRIOR} rounds, never for more rounds than you played).</li>
         </ol>
       </section>
 
@@ -2218,7 +2230,7 @@
     },
     rankSort: (ds) => {
       const s = ui.rank.sort;
-      const cur = s || { k: ui.rank.by === 'points' ? 'pts' : ui.rank.by === 'champions' ? 'champions' : 'rating', dir: -1 };
+      const cur = s || defaultSort();
       ui.rank.sort = cur.k === ds.k ? { k: ds.k, dir: -cur.dir } : { k: ds.k, dir: -1 };
       sfx.tap();
       render();
