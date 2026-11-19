@@ -5,7 +5,7 @@
   const Y = window.SyncLib;
   const K = window.Charts;
   const KEY = 'champions.v1';
-  const APP_VERSION = '2.1';
+  const APP_VERSION = '2.2';
   const EMOJIS = ['🦁', '🐯', '🦊', '🐺', '🦅', '🐻', '🐼', '🦈', '🐙', '🦄', '🐲', '🦖', '🐸', '🐵', '🦉', '🐝', '🦂', '🐊', '🦬', '🐆', '🦩', '🐧', '🐳', '🦍', '🐗', '🦓', '🐍', '🦚'];
   const CHIP_COLORS = ['#e23b3b', '#2f6fe0', '#1f9d55', '#222226', '#8e44ad', '#e67e22', '#c99a06'];
   const THEMES = {
@@ -116,6 +116,25 @@
     const gone = C.leavesBy(night);
     return night.playerIds.filter((id) => !gone.has(id));
   };
+  /** Players marked Out on the round screen of this night (sitting out right now). */
+  const outNow = (night) => {
+    const d = ui.draft && ui.draft.nightId === night.id ? ui.draft : null;
+    return d ? seatedIds(night).filter((id) => d.out && d.out[id]) : [];
+  };
+  /** The last round a player played tonight (0 = none yet). */
+  const lastRoundOf = (night, id) => {
+    let last = 0;
+    (night.rounds || []).forEach((r, i) => {
+      if (r.results.some((x) => x.playerId === id)) last = i + 1;
+    });
+    return last;
+  };
+  /** "left after round 6", "out after round 6", "out all night" … */
+  const leftTxt = (after, out) => {
+    const n = Number(after) || 0;
+    if (out) return n ? `out after round ${n}` : 'out all night';
+    return n ? `left after round ${n}` : 'left before round 1';
+  };
 
   function addPlayer(rawName) {
     const name = String(rawName || '').trim().replace(/\s+/g, ' ').slice(0, 24);
@@ -184,8 +203,10 @@
     const txt = Number.isInteger(a) ? String(a) : a.toFixed(2);
     return `${v < 0 ? '−' : signed && v > 0 ? '+' : ''}${txt}`;
   }
-  const medal = (rank) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : String(rank));
-  const medalTxt = (rank) => (rank <= 3 ? medal(rank) : `${rank}.`);
+  /** Rank badge: a gold / silver / bronze poker chip for the top 3, a plain number after that. */
+  const medal = (rank) => (rank >= 1 && rank <= 3 ? `<span class="rchip r${rank}">${rank}</span>` : `<span class="rnum">${rank}</span>`);
+  const MEDAL_TXT = { 1: '🥇', 2: '🥈', 3: '🥉' };
+  const medalTxt = (rank) => MEDAL_TXT[rank] || `${rank}.`; // for shared text
   const ordinal = (n) => {
     const s = ['th', 'st', 'nd', 'rd'];
     const v = n % 100;
@@ -199,7 +220,46 @@
     return `<span class="av ${size}" style="--h:${p.hue | 0}">${p.emoji}</span>`;
   }
   const CROWN = '<svg class="crown" viewBox="0 0 64 48" aria-hidden="true"><path d="M5 17l13 11L32 7l14 21 13-11-5 25H10z" fill="url(#g-gold)" stroke="#7a5200" stroke-width="2" stroke-linejoin="round"/><circle cx="5" cy="16" r="4" fill="url(#g-gold)" stroke="#7a5200" stroke-width="1.6"/><circle cx="32" cy="6" r="4" fill="url(#g-gold)" stroke="#7a5200" stroke-width="1.6"/><circle cx="59" cy="16" r="4" fill="url(#g-gold)" stroke="#7a5200" stroke-width="1.6"/><rect x="10" y="40" width="44" height="6" rx="2" fill="url(#g-gold)" stroke="#7a5200" stroke-width="1.6"/><circle cx="32" cy="32" r="3.2" fill="#e5484d"/><circle cx="20" cy="34" r="2.4" fill="#2f6fe0"/><circle cx="44" cy="34" r="2.4" fill="#1f9d55"/></svg>';
-  const logo = (small) => `<header class="logo ${small ? 'small' : ''}">${CROWN}<h1>CHAMPIONS</h1>${small ? '' : '<p><i class="suit">♠</i> Poker night · points · the bill <i class="suit red">♦</i></p>'}</header>`;
+  const logo = (small) => `<header class="logo ${small ? 'small' : ''}">${CROWN}<h1>CHAMPIONS</h1>${small ? '' : '<p><i class="suit">♠</i><span>Poker night · points · the bill</span><i class="suit red">♦</i></p>'}</header>`;
+
+  /* line icons (24 × 24), drawn in the text color */
+  const svgIcon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+  const IC = {
+    pot: svgIcon('<ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v4c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6M5 10v4c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-4M5 14v4c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-4"/>'),
+    table: svgIcon('<path d="M3 9h18M6 9l1.5-4h9L18 9M6 9v10M18 9v10M6 14h12"/>'),
+    bill: svgIcon('<path d="M6 3h12v18l-2-1.3-2 1.3-2-1.3-2 1.3-2-1.3L6 21z"/><path d="M9 8h6M9 12h6M9 16h3"/>'),
+    door: svgIcon('<path d="M13 4H6v16h7"/><path d="M10 12h10M16.5 8.5 20 12l-3.5 3.5"/>'),
+    join: svgIcon('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M19 8v6M16 11h6"/>'),
+    flag: svgIcon('<path d="M5 21V4M5 4h12l-2.5 4.5L17 13H5"/>'),
+    share: svgIcon('<path d="M12 15V3M7.5 7.5 12 3l4.5 4.5"/><path d="M5 12v6.5A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V12"/>'),
+    trash: svgIcon('<path d="M4 7h16M9.5 7V4h5v3M6 7l1 13h10l1-13M10 11v5.5M14 11v5.5"/>'),
+    undo: svgIcon('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
+    edit: svgIcon('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>'),
+    x: svgIcon('<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>'),
+    plus: svgIcon('<path d="M12 5v14M5 12h14"/>'),
+    plusCircle: svgIcon('<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>'),
+    trophy: svgIcon('<path d="M8 21h8M12 16.5V21M7 4h10v5.5a5 5 0 0 1-10 0z"/><path d="M7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5a3.5 3.5 0 0 1-3.5 3.5"/>'),
+    grid: svgIcon('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 4.5v15"/>'),
+    curve: svgIcon('<path d="M4 4v16h16"/><path d="M7.5 15l3.5-4.5 3 2.5 5-6.5"/>'),
+    updown: svgIcon('<path d="M7 20V5M3.5 8.5 7 5l3.5 3.5M17 4v15M13.5 15.5 17 19l3.5-3.5"/>'),
+    stats: svgIcon('<path d="M5 20v-8M10 20V5M15 20v-6M20 20V10"/>'),
+    phone: svgIcon('<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>'),
+    download: svgIcon('<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/>'),
+    upload: svgIcon('<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 19.5h14"/>'),
+    lock: svgIcon('<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5v-3a4 4 0 0 1 8 0v3"/>'),
+    cloud: svgIcon('<path d="M7 18.5h10a4 4 0 0 0 .6-8 6 6 0 0 0-11.4-1.4A4.5 4.5 0 0 0 7 18.5z"/>'),
+    alert: svgIcon('<path d="M12 4 2.5 20h19z"/><path d="M12 10v4.5M12 17.3v.2"/>'),
+    sync: svgIcon('<path d="M20 11a8 8 0 0 0-14.3-4.8L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.8L20 16M20 20v-4h-4"/>'),
+    eye: svgIcon('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>'),
+    eyeOff: svgIcon('<path d="M3 3l18 18M10.6 5.6c.5-.1.9-.1 1.4-.1 6 0 9.5 6.5 9.5 6.5a16 16 0 0 1-2.9 3.7M6.6 6.6C4 8.3 2.5 12 2.5 12S6 18.5 12 18.5c1.6 0 3-.4 4.3-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2"/>'),
+    chevL: svgIcon('<path d="M15 5l-7 7 7 7"/>'),
+    chevR: svgIcon('<path d="M9 5l7 7-7 7"/>'),
+    cards: svgIcon('<rect x="3" y="6.5" width="11" height="15" rx="2"/><path d="M9.5 3.6l8.7 2.3a2 2 0 0 1 1.4 2.5l-3 11.4"/>'),
+    calendar: svgIcon('<rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
+    crown: '<svg class="ic ic-crown" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5l4.6 4 4.4-7.5 4.4 7.5 4.6-4-1.8 10.5H4.8z"/></svg>',
+  };
+  /** A small gold crown and a count: "♛ 2" */
+  const crowns = (n) => (n ? `<span class="crowns-n">${IC.crown}${n}</span>` : '');
 
   /* ================= UI state ================= */
   const ui = {
@@ -209,8 +269,8 @@
     draft: null,
     reportId: null,
     historyId: null,
-    // rankings: period, ranking kind, sub-view (board | table | curves | bills), table sort, curve metric, highlighted player
-    rank: { type: 'month', offset: 0, by: 'fair', view: 'board', sort: null, metric: 'rank', focus: null },
+    // rankings: period, ranking kind, sub-view, table sort, curve metric, highlighted player, win/loss money (cards | net)
+    rank: { type: 'month', offset: 0, by: 'fair', view: 'board', sort: null, metric: 'rank', focus: null, money: 'cards' },
     billInput: '',
     billTable: false,
     billExtras: [], // [{ playerId, amount }] extra money toward tonight's bill
@@ -337,16 +397,26 @@
           </div>
         </div>`;
       const close = (value) => {
-        const inp = root.querySelector('input, textarea');
-        const input = inp ? inp.value : null;
+        const all = [...root.querySelectorAll('input, textarea')];
+        const input = all.length ? all[0].value : null;
+        // fields with data-k come back by name: { pot: '5', paid: '' }
+        const inputs = Object.fromEntries(all.filter((x) => x.dataset.k).map((x) => [x.dataset.k, x.value]));
         root.innerHTML = '';
         root.onclick = null;
         root.onkeydown = null;
         if (prevFocus && prevFocus.focus) try { prevFocus.focus({ preventScroll: true }); } catch (_) { /* ignore */ }
-        resolve({ value, input });
+        resolve({ value, input, inputs });
         if (renderPending) setTimeout(() => renderPending && render(), 60);
       };
       root.onclick = (e) => {
+        // quick amounts fill a field without closing the dialog
+        const fill = e.target.closest('[data-fill]');
+        if (fill) {
+          const inp = root.querySelector(`input[data-k="${fill.dataset.fill}"]`);
+          if (inp) inp.value = fill.dataset.v;
+          root.querySelectorAll(`[data-fill="${fill.dataset.fill}"]`).forEach((b) => b.classList.toggle('on', b === fill));
+          return;
+        }
         const el = e.target.closest('[data-modal-value]');
         if (!el) return;
         const v = el.dataset.modalValue;
@@ -394,6 +464,40 @@
     }
     return C.r2(n);
   }
+  /**
+   * Someone leaves (or is taken out of the bill): what they put in the pot and what they
+   * pay toward the bill. Both come off the bill for the others. Returns { pot, paid } or null.
+   */
+  async function askLeaveMoney(id, cur = {}, atBill = false) {
+    const s = S();
+    const fees = [...new Set([s.potFeeBelow, s.potFeeAt, s.potFeeAbove].map(Number).filter((v) => v > 0))].sort((a, b) => a - b);
+    const field = (k, label, sub, v, quick = []) => `
+      <div class="money-field">
+        <span class="mf-label"><b>${label}</b><small>${sub}</small></span>
+        <div class="money-in sm"><input inputmode="decimal" data-k="${k}" value="${Number(v) > 0 ? esc(String(v)) : ''}" placeholder="0" aria-label="${label}"><span>${esc(s.currency)}</span></div>
+        ${quick.length ? `<div class="quick-fill">${quick.map((q) => `<button type="button" class="qf ${Number(v || 0) === q ? 'on' : ''}" data-fill="${k}" data-v="${q}">${moneyHtml(q)}</button>`).join('')}</div>` : ''}
+      </div>`;
+    const r = await ask({
+      title: atBill ? `${nameOf(id)} is not in the bill` : `${nameOf(id)} leaves`,
+      body: `<p class="hint" style="margin:0 0 4px">They keep their points and are left out of the bill split.</p>
+        ${field('pot', 'Puts in the pot', 'like a pot fee', cur.pot, [0, ...fees])}
+        ${field('paid', 'Pays toward the bill', 'their part of the bill, if any', cur.paid)}
+        <p class="hint">Both come off the bill for the others. Leave empty for nothing.</p>`,
+      buttons: [{ label: 'OK', value: 'ok', kind: 'primary' }, { label: 'Cancel', value: null }],
+    });
+    if (r.value !== 'ok') return null;
+    const num = (x) => (String(x == null ? '' : x).trim() === '' ? 0 : parseNum(x));
+    const pot = num(r.inputs.pot);
+    const paid = num(r.inputs.paid);
+    if (![pot, paid].every((v) => Number.isFinite(v) && v >= 0)) {
+      toast('Please type a number');
+      return null;
+    }
+    return { pot: C.r2(pot), paid: C.r2(paid) };
+  }
+  /** "pot 5 € · paid 20 €" for someone who left (empty when they paid nothing). */
+  const leftMoneyTxt = (pot, paid) => [Number(pot) > 0 ? `pot ${money(pot)}` : '', Number(paid) > 0 ? `paid ${money(paid)}` : ''].filter(Boolean).join(' · ');
+
   async function askText(title, value = '', placeholder = '') {
     const r = await ask({
       title,
@@ -457,7 +561,7 @@
     }
     L.push('', `Ranking (${plural(sum.rounds, 'round')}):`);
     for (const p of sum.players) {
-      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — ${ptsTxt(p.pts)} pts${p.start ? ` (incl. ${ptsTxt(p.start)} start pts)` : ''}${p.left ? ` · left after round ${p.leftAfter}` : ''} · won ${money(p.won)} · lost ${money(p.lost)} · fees ${money(p.fees)}`);
+      L.push(`${medalTxt(p.rank)} ${P(p.playerId).name} — ${ptsTxt(p.pts)} pts${p.start ? ` (incl. ${ptsTxt(p.start)} start pts)` : ''}${p.left ? ` · ${leftTxt(p.leftAfter, p.leftOut)}` : ''} · won ${money(p.won)} · lost ${money(p.lost)} · fees ${money(p.fees)}`);
     }
     L.push('', `🍯 Pot: ${money(sum.potTotal)} · 🪑 Table: ${money(sum.tableTotal)}`);
     if (plan) {
@@ -466,7 +570,7 @@
       if (plan.leftTotal) off.push(`paid when leaving ${money(plan.leftTotal)}`);
       if (plan.extrasTotal) off.push(`extra ${money(plan.extrasTotal)}`);
       L.push(`🧾 Bill ${money(plan.invoice)} − ${off.join(' − ')} = ${money(plan.remaining)} for ${plural(plan.payers, 'player')}`);
-      for (const l of plan.leavers) L.push(`   👋 ${P(l.playerId).name} left after round ${l.afterRound} and paid ${money(l.paid)}`);
+      for (const l of plan.leavers) L.push(`   👋 ${P(l.playerId).name} ${leftTxt(l.afterRound, l.out)}${leftMoneyTxt(l.pot, l.paid) ? ` · ${leftMoneyTxt(l.pot, l.paid)}` : ''} · not in the bill`);
       for (const e of plan.extras) L.push(`   ➕ ${P(e.playerId).name} paid ${money(e.amount)} extra`);
       for (const l of plan.lines) if (l.amount > 0) L.push(`   • ${P(l.playerId).name}: ${pctTxt(l.pct)} → ${money(l.amount)}${l.tied ? ' (tied)' : ''}`);
       if (plan.leftover > 0) L.push(`   ${money(plan.leftover)} left over`);
@@ -596,7 +700,7 @@
     checkTeamFile();
   }
   function renderLock() {
-    const head = `${logo()}<div class="lock-ico">🔒</div>`;
+    const head = `${logo()}<div class="lock-ico">${IC.lock}</div>`;
     const note = lock.msg ? `<p class="hint warn" style="text-align:center">${esc(lock.msg)}</p>` : '';
     if (lock.state === 'loading') return `${head}<section class="card"><div class="empty">Connecting…</div></section>`;
     if (lock.state === 'error') {
@@ -742,9 +846,9 @@
     let kind = '';
     if (sync.error) {
       kind = 'err';
-      text = '⚠️ Sync problem';
-    } else if (!sync.lastSync) text = '☁️ Connecting to the team…';
-    else text = `🔒 Team sync · ${agoTxt(sync.lastSync)}`;
+      text = `${IC.alert}Sync problem`;
+    } else if (!sync.lastSync) text = `${IC.cloud}Connecting to the team…`;
+    else text = `${IC.lock}Team sync · ${agoTxt(sync.lastSync)}`;
     return `<button class="sync-chip ${kind}" data-action="syncTap">${text}</button>`;
   }
   const syncBar = () => (syncOn() ? `<div class="sync-bar"><span class="sync-slot">${syncChip()}</span></div>` : '');
@@ -757,14 +861,14 @@
   function syncCard() {
     return `
       <section class="card" id="sync-card">
-        <div class="card-head"><h3>🔒 Team</h3><span class="sync-slot">${syncChip()}</span></div>
+        <div class="card-head"><h3>${IC.lock}Team</h3><span class="sync-slot">${syncChip()}</span></div>
         <ul class="calc-lines">
           <li><span>Data</span><b>locked with the team password</b></li>
           <li><span>Last synced</span><b>${sync.lastSync ? DATE_TIME_FMT.format(new Date(sync.lastSync)) : 'not yet'}</b></li>
         </ul>
-        ${sync.error ? `<p class="hint warn">⚠️ ${esc(sync.error)}</p>` : ''}
+        ${sync.error ? `<p class="hint warn">${IC.alert} ${esc(sync.error)}</p>` : ''}
         <p class="hint">To add a phone: open the app there and type the team password. That is all.</p>
-        <div class="btn-row"><button class="secondary" data-action="syncManual">🔄 Sync now</button><button class="secondary" data-action="changePassword">Change password</button></div>
+        <div class="btn-row"><button class="secondary" data-action="syncManual">${IC.sync}Sync now</button><button class="secondary" data-action="changePassword">${IC.lock}Password</button></div>
         <div class="btn-row" style="margin-bottom:0"><button class="ghost" data-action="replaceKey">Replace GitHub key</button><button class="ghost" data-action="lockPhone">Sign out this phone</button></div>
       </section>`;
   }
@@ -876,38 +980,40 @@
       <button class="cta" data-action="newNight">
         <span class="cta-chip" aria-hidden="true"><span>♠</span></span>
         <span class="cta-txt"><b>Start tonight</b><small>Pick the players and deal the first round</small></span>
-        <span class="cta-go" aria-hidden="true">›</span>
+        <span class="cta-go" aria-hidden="true">${IC.chevR}</span>
       </button>
 
-      ${installHint ? `<section class="card notice"><span class="ico">📲</span><div><b>Install on your iPhone</b><p>Tap <b>Share</b> <span aria-hidden="true">⬆️</span> then <b>Add to Home Screen</b>.</p></div></section>` : ''}
-      ${needBackup ? `<section class="card notice"><span class="ico">💾</span><div style="flex:1"><b>Save a backup</b><p>Keep your history safe — takes 2 seconds.</p></div><button class="link" data-action="exportData">Backup</button></section>` : ''}
+      ${installHint ? `<section class="card notice"><span class="ico">${IC.phone}</span><div><b>Install on your iPhone</b><p>Tap <b>Share</b> then <b>Add to Home Screen</b>.</p></div></section>` : ''}
+      ${needBackup ? `<section class="card notice"><span class="ico">${IC.download}</span><div style="flex:1"><b>Save a backup</b><p>Keep your history safe — takes 2 seconds.</p></div><button class="link" data-action="exportData">Backup</button></section>` : ''}
 
       ${last && lastSum.champions.length ? `
-      <section class="card">
-        <div class="card-head"><h3>Last champion</h3><button class="link" data-action="openNight" data-id="${last.id}">See night →</button></div>
-        <div class="last-champ">
-          ${lastSum.champions.map((id) => avatar(id, 'lg')).join('')}
-          <div><b>👑 ${esc(namesJoin(lastSum.champions))}</b><span class="muted">${fmtDate(last.date)} · ${ptsTxt(lastSum.players[0].pts)} points</span></div>
-        </div>
-      </section>` : ''}
+      <button class="card hero" data-action="openNight" data-id="${last.id}" aria-label="Last champion: ${esc(namesJoin(lastSum.champions))}, ${fmtDate(last.date)}. Open the night">
+        <span class="hero-rays" aria-hidden="true"></span>
+        <span class="eyebrow">${IC.crown}Last champion · ${DAYMON_FMT.format(toDate(last.date))}</span>
+        <span class="hero-row">
+          <span class="hero-avs">${lastSum.champions.map((id) => avatar(id, 'lg')).join('')}</span>
+          <span class="hero-txt"><b>${esc(namesJoin(lastSum.champions))}</b><small>${ptsTxt(lastSum.players[0].pts)} points · ${plural(lastSum.players[0].roundsWon, 'round')} won</small></span>
+          <span class="hero-go" aria-hidden="true">${IC.chevR}</span>
+        </span>
+      </button>` : ''}
 
       <section class="card">
-        <div class="card-head"><h3>${MONTH_FMT.format(new Date())}</h3><button class="link" data-action="openRanking">Full ranking →</button></div>
-        ${month.length ? `<div class="mini-board">${month.slice(0, 5).map((p) => `
-          <button class="row" data-action="showPlayer" data-id="${p.playerId}" data-scope="month">
-            <span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>
+        <div class="card-head"><h3>${MONTH_FMT.format(new Date())}</h3><button class="link" data-action="openRanking">Full ranking${IC.chevR}</button></div>
+        ${month.length ? `<div class="mini-board">${month.slice(0, 5).map((p, i) => `
+          <button class="row" data-action="showPlayer" data-id="${p.playerId}" data-scope="month" style="--i:${i}">
+            <span class="rk">${medal(p.rank)}</span>
             ${avatar(p.playerId)}
             <span class="nm"><span class="name">${nameOf(p.playerId)}${p.provisional ? '<i class="tag">new</i>' : ''}</span><small>${plural(p.roundsPlayed, 'round')} · ${plural(p.roundsWon, 'win')} · <span class="${cls(p.total)}">${moneyHtml(p.total, true)}</span></small></span>
-            <span class="crowns" title="Champion nights">${p.champions ? `👑${p.champions}` : ''}</span>
+            <span class="crowns" title="Champion nights">${crowns(p.champions)}</span>
             <span class="score">${fairTxt(p.fair)}<small>fair pts</small></span>
           </button>`).join('')}</div>` : `<div class="empty"><span class="big">🂡</span>No finished nights this month yet.<br>Start one and crown a champion!</div>`}
       </section>
 
       <div class="tiles">
-        <div class="tile"><small>Nights</small><b>${finished.length}</b></div>
-        <div class="tile"><small>Rounds</small><b>${totalRounds}</b></div>
-        <div class="tile"><small>Pot collected</small><b>${esc(money(totalPot))}</b></div>
-        <div class="tile"><small>Bills paid</small><b>${esc(money(bills.totals.invoice))}</b></div>
+        <div class="tile"><span class="t-ico">${IC.calendar}</span><small>Nights</small><b>${finished.length}</b></div>
+        <div class="tile"><span class="t-ico">${IC.cards}</span><small>Rounds</small><b>${totalRounds}</b></div>
+        <div class="tile"><span class="t-ico">${IC.pot}</span><small>Pot collected</small><b>${esc(money(totalPot))}</b></div>
+        <div class="tile"><span class="t-ico">${IC.bill}</span><small>Bills paid</small><b>${esc(money(bills.totals.invoice))}</b></div>
       </div>`;
   }
 
@@ -954,7 +1060,7 @@
         }).join('')}</div>` : '<div class="empty">No saved players yet — add the first name above.</div>'}
       </section>
       <div class="stack">
-        <button class="primary" data-action="startNight" ${ready ? '' : 'disabled'}>${ready ? 'Shuffle up & deal 🃏' : `Pick ${st.count - n > 0 ? st.count - n + ' more' : n - st.count + ' fewer'}`}</button>
+        <button class="primary" data-action="startNight" ${ready ? '' : 'disabled'}>${ready ? `${IC.cards}Shuffle up &amp; deal` : `Pick ${st.count - n > 0 ? st.count - n + ' more' : n - st.count + ' fewer'}`}</button>
         <button class="ghost" data-action="setupBack">← Back</button>
       </div>`;
   }
@@ -994,9 +1100,9 @@
       ${syncBar()}
       <div class="game-top">
         <div><span class="eyebrow"><span class="live-dot"></span>Live · ${fmtDate(night.date)}</span><h2>Round ${night.rounds.length + 1}</h2></div>
-        <div class="pills"><span class="pill">🍯 Pot ${moneyHtml(sum.potTotal)}</span><span class="pill">🪑 Table ${moneyHtml(sum.tableTotal)}</span></div>
+        <div class="pills"><span class="pill">${IC.pot}Pot <b>${moneyHtml(sum.potTotal)}</b></span><span class="pill">${IC.table}Table <b>${moneyHtml(sum.tableTotal)}</b></span></div>
       </div>
-      <section class="card notice"><span class="ico">👀</span><div><b>Following the team's game live</b><p>New rounds appear by themselves. To enter rounds on this phone, add the team key in Settings.</p></div></section>
+      <section class="card notice"><span class="ico">${IC.eye}</span><div><b>Following the team's game live</b><p>New rounds appear by themselves. To enter rounds on this phone, add the team key in Settings.</p></div></section>
       ${scoreboard(night, sum)}
       ${roundsCard(night, false)}`;
   }
@@ -1006,11 +1112,11 @@
       <section class="card">
         <div class="card-head"><h3>Tonight's table</h3><span class="muted">${plural(night.rounds.length, 'round')}</span></div>
         <div class="board">${sum.players.map((p) => `
-          <div class="board-row">
-            <span class="rk ${night.rounds.length && p.rank <= 3 ? 'medal' : ''}">${night.rounds.length ? medal(p.rank) : '·'}</span>
+          <div class="board-row ${p.left ? 'is-left' : ''}">
+            <span class="rk">${night.rounds.length ? medal(p.rank) : '<span class="rnum">·</span>'}</span>
             ${avatar(p.playerId)}
-            <span class="nm"><span class="name">${nameOf(p.playerId)}${sum.champions.includes(p.playerId) ? ' 👑' : ''}${p.left ? '<i class="tag">left</i>' : ''}</span>
-              <small>${p.left ? `left after R${p.leftAfter} · paid ${moneyHtml(p.leftPaid)} · ` : ''}${p.start ? `${ptsTxt(p.start)} start pts · ` : ''}${plural(p.roundsWon, 'win')} · money <span class="${cls(p.net)}">${moneyHtml(p.net, true)}</span> after fees</small></span>
+            <span class="nm"><span class="name">${nameOf(p.playerId)}${sum.champions.includes(p.playerId) ? IC.crown : ''}${p.left ? `<i class="tag">${p.leftOut ? 'out' : 'left'}</i>` : ''}</span>
+              <small>${p.left ? `${leftTxt(p.leftAfter, p.leftOut)}${leftMoneyTxt(p.leftPot, p.leftPaid) ? ` · ${esc(leftMoneyTxt(p.leftPot, p.leftPaid))}` : ''} · ` : ''}${p.start ? `${ptsTxt(p.start)} start pts · ` : ''}${plural(p.roundsWon, 'win')} · money <span class="${cls(p.net)}">${moneyHtml(p.net, true)}</span> after fees</small></span>
             <span class="score">${ptsTxt(p.pts)}<small>pts</small></span>
           </div>`).join('')}</div>
       </section>`;
@@ -1032,19 +1138,19 @@
   }
   function joinRow(j, editable) {
     return `<div class="round-row join-row">
-      <div class="round-no">＋<small>joined</small></div>
+      <div class="round-no">${IC.join}<small>joined</small></div>
       <div class="round-main"><b>${avatar(j.playerId, 'sm')} ${nameOf(j.playerId)} joined after round ${j.afterRound}</b>
         <small>started with ${ptsTxt(j.pts)} pts</small></div>
-      ${editable ? `<button class="icon-btn" data-action="editJoin" data-id="${j.id}" aria-label="Change starting points of ${nameOf(j.playerId)}">✎</button>` : ''}
+      ${editable ? `<button class="icon-btn" data-action="editJoin" data-id="${j.id}" aria-label="Change starting points of ${nameOf(j.playerId)}">${IC.edit}</button>` : ''}
     </div>`;
   }
   function leaveRow(l, editable) {
     return `<div class="round-row join-row leave-row">
-      <div class="round-no">👋<small>left</small></div>
-      <div class="round-main"><b>${avatar(l.playerId, 'sm')} ${nameOf(l.playerId)} left after round ${l.afterRound || 0}</b>
-        <small>paid ${moneyHtml(l.paid || 0)} toward the bill · not in the bill split</small></div>
-      ${editable ? `<button class="icon-btn" data-action="editLeave" data-id="${l.id}" aria-label="Change what ${nameOf(l.playerId)} paid">✎</button>
-        <button class="icon-btn" data-action="undoLeave" data-id="${l.id}" aria-label="${nameOf(l.playerId)} is back at the table">↩︎</button>` : ''}
+      <div class="round-no">${IC.door}<small>${l.out ? 'out' : 'left'}</small></div>
+      <div class="round-main"><b>${avatar(l.playerId, 'sm')} ${nameOf(l.playerId)} ${leftTxt(l.afterRound, l.out)}</b>
+        <small>${Number(l.pot) > 0 ? `put ${moneyHtml(l.pot)} in the pot · ` : ''}${Number(l.paid) > 0 ? `paid ${moneyHtml(l.paid)} toward the bill · ` : ''}not in the bill split</small></div>
+      ${editable ? `<button class="icon-btn" data-action="editLeave" data-id="${l.id}" aria-label="Change what ${nameOf(l.playerId)} paid">${IC.edit}</button>
+        <button class="icon-btn" data-action="undoLeave" data-id="${l.id}" aria-label="${nameOf(l.playerId)} is back at the table">${IC.undo}</button>` : ''}
     </div>`;
   }
 
@@ -1071,7 +1177,7 @@
         <div class="seg" role="group" aria-label="Money for ${nameOf(id)}">
           ${quick.map((q) => `<button class="${!out && v === q ? 'on' : ''}" data-action="setAmt" data-id="${id}" data-v="${q}">${q}</button>`).join('')}
           <button class="wide ${isFull ? 'on' : ''}" data-action="setAmt" data-id="${id}" data-v="full">Full ${C.r2(full)}</button>
-          <button class="${isCustom ? 'on' : ''}" data-action="setAmt" data-id="${id}" data-v="custom" aria-label="Other amount">${isCustom ? C.r2(v) : '✎'}</button>
+          <button class="${isCustom ? 'on' : ''}" data-action="setAmt" data-id="${id}" data-v="custom" aria-label="Other amount">${isCustom ? C.r2(v) : IC.edit}</button>
           <button class="out ${out ? 'on' : ''}" data-action="setAmt" data-id="${id}" data-v="out">Out</button>
         </div>
       </div>`;
@@ -1094,11 +1200,11 @@
     if (n < 2) previewHtml = '<span class="warn">At least 2 players must play this round.</span>';
     else if (!complete) {
       previewHtml = d.order.length
-        ? `<span>🥇 <b>${nameOf(d.order[0])}</b> wins · tap the rest in order (${remaining.length - 1} more)</span>`
-        : '<span>👆 Tap who won, then 2nd, 3rd … down to last</span>';
+        ? `<span>${medal(1)} <b>${nameOf(d.order[0])}</b> wins · tap the rest in order (${remaining.length - 1} more)</span>`
+        : '<span>Tap who won, then 2nd, 3rd … down to last</span>';
     } else {
       const w = preview.results[0];
-      previewHtml = `<span>🥇 <b>${nameOf(w.playerId)}</b> +${ptsTxt(w.pts)} pts · wins <b class="pos">${moneyHtml(w.won)}</b></span>
+      previewHtml = `<span>${medal(1)} <b>${nameOf(w.playerId)}</b> +${ptsTxt(w.pts)} pts · wins <b class="pos">${moneyHtml(w.won)}</b></span>
         <span>pays ${moneyHtml(w.table)} table + ${moneyHtml(w.pot)} pot → <b class="${cls(w.won - w.table - w.pot)}">${moneyHtml(w.won - w.table - w.pot, true)}</b></span>`;
     }
 
@@ -1106,7 +1212,7 @@
       ${syncBar()}
       <div class="game-top">
         <div><span class="eyebrow">Tonight · ${fmtDate(night.date)}</span><h2>Round ${roundNo}</h2></div>
-        <div class="pills"><span class="pill">🍯 Pot ${moneyHtml(sum.potTotal)}</span><span class="pill">🪑 Table ${moneyHtml(sum.tableTotal)}</span></div>
+        <div class="pills"><span class="pill">${IC.pot}Pot <b>${moneyHtml(sum.potTotal)}</b></span><span class="pill">${IC.table}Table <b>${moneyHtml(sum.tableTotal)}</b></span></div>
       </div>
 
       <section class="card">
@@ -1140,10 +1246,11 @@
       ${roundsCard(night, true)}
 
       <div class="btn-row">
-        <button class="secondary" data-action="addLate">＋ Player joins</button>
-        <button class="secondary" data-action="leavePlayer">👋 Player leaves</button>
+        <button class="secondary" data-action="addLate">${IC.join}Player joins</button>
+        <button class="secondary" data-action="leavePlayer">${IC.door}Player leaves</button>
       </div>
-      <button class="danger" data-action="finishNight">🏁 We're done — the bill</button>`;
+      <button class="danger" data-action="finishNight">${IC.flag}We're done — the bill</button>
+      ${outNow(night).length ? `<p class="hint center">Marked <b>Out</b> at the end = not in the bill: ${esc(namesJoin(outNow(night)))}.</p>` : ''}`;
   }
 
   function roundRow(r, i, deletable) {
@@ -1151,10 +1258,10 @@
     const others = r.results.slice(1).map((x) => `${esc(P(x.playerId).name)} ${x.place}. −${C.r2(x.lost)}`).join(' · ');
     return `<div class="round-row">
       <div class="round-no">R${i + 1}<small>${ptsTxt(r.points)} pt${r.points === 1 ? '' : 's'}</small></div>
-      <div class="round-main"><b>🥇 ${nameOf(w.playerId)} +${ptsTxt(w.pts)} pts · ${moneyHtml(w.won, true)}</b>
+      <div class="round-main"><b>${medal(1)} ${nameOf(w.playerId)} +${ptsTxt(w.pts)} pts · <span class="pos">${moneyHtml(w.won, true)}</span></b>
         <small>played ${moneyHtml(w.played)} · table ${moneyHtml(w.table)} · pot ${moneyHtml(w.pot)}</small>
         <small>${others}</small></div>
-      ${deletable ? `<button class="icon-btn" data-action="deleteRound" data-id="${r.id}" aria-label="Delete round ${i + 1}">✕</button>` : ''}
+      ${deletable ? `<button class="icon-btn" data-action="deleteRound" data-id="${r.id}" aria-label="Delete round ${i + 1}">${IC.x}</button>` : ''}
     </div>`;
   }
 
@@ -1172,9 +1279,9 @@
     return `
       <ul class="calc-lines">
         <li><span>Bill</span><b>${moneyHtml(plan.invoice)}</b></li>
-        <li><span>− Pot</span><b>${moneyHtml(plan.potTotal)}</b></li>
+        <li><span>− Pot${plan.leftPotTotal > 0 ? ` <small>incl. ${moneyHtml(plan.leftPotTotal)} from players leaving</small>` : ''}</span><b>${moneyHtml(plan.potTotal)}</b></li>
         ${plan.tableToInvoice ? `<li><span>− Table money</span><b>${moneyHtml(plan.tableUsed)}</b></li>` : ''}
-        ${plan.leavers.map((l) => `<li><span>− ${nameOf(l.playerId)} <small>paid when leaving</small></span><b>${moneyHtml(l.paid)}</b></li>`).join('')}
+        ${plan.leavers.filter((l) => l.paid > 0).map((l) => `<li><span>− ${nameOf(l.playerId)} <small>paid when leaving</small></span><b>${moneyHtml(l.paid)}</b></li>`).join('')}
         ${plan.extras.map((e) => `<li><span>− ${nameOf(e.playerId)} <small>extra</small></span><b>${moneyHtml(e.amount)}</b></li>`).join('')}
         <li class="total"><span>Split by ranking</span><b>${moneyHtml(plan.remaining)}</b></li>
         ${plan.leftover > 0 ? `<li><span>Left over</span><b class="pos">${moneyHtml(plan.leftover)}</b></li>` : ''}
@@ -1205,17 +1312,21 @@
 
   function billPreview(night) {
     const { plan, bill } = billDraft(night);
+    const canTakeOut = plan.payers > 1;
     return `
+      <h3>${IC.bill}The split</h3>
       ${billLines(plan)}
       ${billBar(planParts(plan))}
-      <p class="hint">${plural(plan.payers, 'player')} at the table → last place pays ${bill.shares.map((x) => `${x}%`).join(' · ')}. Tied players share equally.${plan.leavers.length ? ' Players who left are not in the split.' : ''}</p>
+      <p class="hint">${plural(plan.payers, 'player')} in the bill → last place pays ${bill.shares.map((x) => `${x}%`).join(' · ')}. Tied players share equally.${plan.leavers.length ? ` Not in the bill: ${esc(namesJoin(plan.leavers.map((l) => l.playerId)))}.` : ''}</p>
       ${plan.payers ? `<div class="pay-list">${plan.lines.map((l) => `
         <div class="pay-row ${l.amount > 0 ? '' : 'free'}">
           ${avatar(l.playerId, 'sm')}
           <span class="nm"><span class="name">${nameOf(l.playerId)}${l.tied ? '<span class="tie-tag">tied</span>' : ''}</span><small>${ordinal(l.rank)} place</small></span>
           <span class="pct">${pctTxt(l.pct)}</span>
           <span class="amt">${l.amount > 0 ? moneyHtml(l.amount) : '—'}</span>
-        </div>`).join('')}</div>` : '<p class="hint warn">Nobody is left at the table to pay the rest.</p>'}`;
+          ${canTakeOut ? `<button class="icon-btn sm" data-action="leavePlayer" data-id="${l.playerId}" aria-label="Take ${nameOf(l.playerId)} out of the bill">${IC.x}</button>` : ''}
+        </div>`).join('')}</div>
+        ${canTakeOut ? `<p class="hint">${IC.x} takes someone out of the bill (they left, or don't pay tonight).</p>` : ''}` : '<p class="hint warn">Nobody is left at the table to pay the rest.</p>'}`;
   }
 
   function renderBill(night) {
@@ -1223,10 +1334,10 @@
     const leaves = C.leavesBy(night);
     const leavers = sum.players.filter((p) => p.left);
     return `
-      <h2 class="page-title">🏁 That's it for tonight</h2>
+      <h2 class="page-title">That's it for tonight</h2>
       <p class="page-sub">${plural(night.rounds.length, 'round')} played · pot ${moneyHtml(sum.potTotal)} · table ${moneyHtml(sum.tableTotal)}</p>
       <section class="card">
-        <h3>How much is the bill?</h3>
+        <h3>${IC.bill}How much is the bill?</h3>
         <div class="money-in" style="margin-top:10px">
           <input id="bill-input" inputmode="decimal" placeholder="0" value="${esc(ui.billInput)}" data-input="bill" data-enter="confirmBill" aria-label="Bill amount">
           <span>${esc(S().currency)}</span>
@@ -1235,35 +1346,35 @@
       </section>
 
       <section class="card">
-        <div class="card-head"><h3>👋 Left early</h3><button class="link" data-action="leavePlayer">＋ Someone left</button></div>
+        <div class="card-head"><h3>${IC.door}Not in the bill</h3><button class="link" data-action="leavePlayer">${IC.plus}Take out</button></div>
         ${leavers.length ? leavers.map((p) => {
           const l = leaves.get(p.playerId);
           return `<div class="pay-row">
             ${avatar(p.playerId, 'sm')}
-            <span class="nm"><span class="name">${nameOf(p.playerId)}</span><small>left after round ${p.leftAfter}</small></span>
-            <span class="amt">${moneyHtml(p.leftPaid)}</span>
-            <button class="icon-btn" data-action="editLeave" data-id="${l.id}" aria-label="Change what ${nameOf(p.playerId)} paid">✎</button>
-            <button class="icon-btn" data-action="undoLeave" data-id="${l.id}" aria-label="${nameOf(p.playerId)} is back at the table">↩︎</button>
+            <span class="nm"><span class="name">${nameOf(p.playerId)}</span><small>${leftTxt(p.leftAfter, p.leftOut)} · ${esc(leftMoneyTxt(p.leftPot, p.leftPaid) || 'paid nothing')}</small></span>
+            <span class="amt">${moneyHtml(C.r2(p.leftPot + p.leftPaid))}</span>
+            <button class="icon-btn" data-action="editLeave" data-id="${l.id}" aria-label="Change what ${nameOf(p.playerId)} paid">${IC.edit}</button>
+            <button class="icon-btn" data-action="undoLeave" data-id="${l.id}" aria-label="Put ${nameOf(p.playerId)} back in the bill">${IC.undo}</button>
           </div>`;
-        }).join('') : '<p class="muted">Nobody left early.</p>'}
-        <p class="hint">What they paid comes off the bill, and they are left out of the split.</p>
+        }).join('') : '<p class="muted">Everybody at the table is in the bill.</p>'}
+        <p class="hint">Players who left, or were still marked <b>Out</b> when you finished. They are left out of the split. What they put in the pot or paid toward the bill comes off the bill. ${IC.edit} changes it, ${IC.undo} puts someone back in.</p>
       </section>
 
       <section class="card">
-        <div class="card-head"><h3>➕ Extra money</h3><button class="link" data-action="addExtra">＋ Add</button></div>
+        <div class="card-head"><h3>${IC.plusCircle}Extra money</h3><button class="link" data-action="addExtra">${IC.plus}Add</button></div>
         ${ui.billExtras.length ? ui.billExtras.map((e, i) => `<div class="pay-row">
             ${avatar(e.playerId, 'sm')}
             <span class="nm"><span class="name">${nameOf(e.playerId)}</span><small>paid extra toward the bill</small></span>
             <span class="amt">${moneyHtml(e.amount)}</span>
-            <button class="icon-btn" data-action="removeExtra" data-i="${i}" aria-label="Remove the extra money of ${nameOf(e.playerId)}">✕</button>
+            <button class="icon-btn" data-action="removeExtra" data-i="${i}" aria-label="Remove the extra money of ${nameOf(e.playerId)}">${IC.x}</button>
           </div>`).join('') : '<p class="muted">Nobody paid extra.</p>'}
         <p class="hint">Extra money comes off the bill for everyone, like the pot. The rest is split by ranking.</p>
       </section>
 
       <section class="card" id="bill-preview">${billPreview(night)}</section>
       <div class="stack">
-        <button class="primary" data-action="confirmBill">Crown the champion 👑</button>
-        <button class="ghost" data-action="backToGame">← Back to the table</button>
+        <button class="primary" data-action="confirmBill">${IC.crown}Crown the champion</button>
+        <button class="ghost" data-action="backToGame">${IC.chevL}Back to the table</button>
       </div>`;
   }
 
@@ -1275,7 +1386,7 @@
     const champs = sum.champions;
     const canReopen = !activeNight();
     return `
-      ${fresh ? '' : '<button class="link" data-action="closeNight">← All nights</button>'}
+      ${fresh ? '' : `<button class="link back" data-action="closeNight">${IC.chevL}All nights</button>`}
       <div class="champ-banner">
         <div class="rays"></div>
         <span class="eyebrow">${champs.length > 1 ? 'Champions' : 'Champion'} of the night · ${fmtDate(night.date)}</span>
@@ -1286,26 +1397,27 @@
       </div>
 
       <section class="card">
-        <h3>🧾 The bill</h3>
+        <h3>${IC.bill}The bill</h3>
         ${plan ? `
         ${billLines(plan)}
         ${billBar(planParts(plan))}
         ${billLegend(planParts(plan))}
         ${plan.lines.filter((l) => l.amount > 0).map((l) => `
           <div class="pay-row">${avatar(l.playerId, 'sm')}<span class="nm"><span class="name">${nameOf(l.playerId)}${l.tied ? '<span class="tie-tag">tied</span>' : ''}</span><small>${ordinal(l.rank)} place</small></span>
-          <span class="pct">${pctTxt(l.pct)}</span><span class="amt">${moneyHtml(l.amount)}</span></div>`).join('')}`
+          <span class="pct">${pctTxt(l.pct)}</span><span class="amt">${moneyHtml(l.amount)}</span></div>`).join('')}
+        ${plan.leavers.length ? `<p class="hint">Not in the bill: ${plan.leavers.map((l) => `${nameOf(l.playerId)}${leftMoneyTxt(l.pot, l.paid) ? ` (${esc(leftMoneyTxt(l.pot, l.paid))})` : ''}`).join(', ')}.</p>` : ''}`
           : '<p class="muted">No bill was entered for this night.</p>'}
         ${!plan || plan.tableToInvoice ? '' : `<p class="hint">Table money collected: <b>${moneyHtml(sum.tableTotal)}</b></p>`}
       </section>
 
       <section class="card">
-        <h3>Who won, who lost</h3>
+        <h3>${IC.updown}Who won, who lost</h3>
         ${sum.players.map((p) => {
           const bill = billBy[p.playerId] || 0;
           const total = C.r2(p.net - bill);
           return `<div class="res ${champs.includes(p.playerId) ? 'is-champ' : ''}">
-            <div class="res-head"><span class="rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>${avatar(p.playerId)}
-              <span class="nm"><span class="name">${nameOf(p.playerId)}${champs.includes(p.playerId) ? ' 👑' : ''}${p.left ? '<i class="tag">left</i>' : ''}</span><small>${plural(p.roundsWon, 'round')} won of ${p.roundsPlayed}${p.start ? ` · joined late with ${ptsTxt(p.start)} pts` : ''}${p.left ? ` · left after round ${p.leftAfter}` : ''}</small></span>
+            <div class="res-head"><span class="rk">${medal(p.rank)}</span>${avatar(p.playerId)}
+              <span class="nm"><span class="name">${nameOf(p.playerId)}${champs.includes(p.playerId) ? IC.crown : ''}${p.left ? `<i class="tag">${p.leftOut ? 'out' : 'left'}</i>` : ''}</span><small>${plural(p.roundsWon, 'round')} won of ${p.roundsPlayed}${p.start ? ` · joined late with ${ptsTxt(p.start)} pts` : ''}${p.left ? ` · ${leftTxt(p.leftAfter, p.leftOut)}` : ''}</small></span>
               <span class="res-pts">${ptsTxt(p.pts)}<small>pts</small></span></div>
             <div class="res-grid">
               <div><small>Won</small><b class="${p.won ? 'pos' : 'zero'}">${moneyHtml(p.won, true)}</b></div>
@@ -1324,11 +1436,11 @@
       </details>
 
       <div class="stack">
-        <button class="primary" data-action="shareNight" data-id="${night.id}">📤 Share the report</button>
+        <button class="primary" data-action="shareNight" data-id="${night.id}">${IC.share}Share the report</button>
         ${fresh ? '<button class="secondary" data-action="doneReport">Done</button>' : ''}
         <div class="btn-row" style="margin:0">
-          <button class="ghost" data-action="reopenNight" data-id="${night.id}" ${canReopen ? '' : 'disabled title="Finish the current night first"'}>↩︎ Reopen night</button>
-          <button class="danger" data-action="deleteNight" data-id="${night.id}">🗑 Delete night</button>
+          <button class="ghost" data-action="reopenNight" data-id="${night.id}" ${canReopen ? '' : 'disabled title="Finish the current night first"'}>${IC.undo}Reopen</button>
+          <button class="danger" data-action="deleteNight" data-id="${night.id}">${IC.trash}Delete</button>
         </div>
       </div>`;
   }
@@ -1390,10 +1502,11 @@
     const { type, offset, view } = ui.rank;
     const data = rankingData();
     const types = [['week', 'Week'], ['month', 'Month'], ['year', 'Year'], ['all', 'All time']];
-    const views = [['board', '🏆', 'Ranking'], ['table', '📋', 'Stats'], ['curves', '📈', 'Curves'], ['bills', '🧾', 'Bills']];
+    const views = [['board', IC.trophy, 'Ranking'], ['money', IC.updown, 'Win/Loss'], ['table', IC.grid, 'Stats'], ['curves', IC.curve, 'Curves'], ['bills', IC.bill, 'Bills']];
     let body;
     if (!data.nights.length) body = '<section class="card"><div class="empty"><span class="big">🂮</span>No finished nights in this period.</div></section>';
     else if (view === 'table') body = statsView(data);
+    else if (view === 'money') body = moneyView(data);
     else if (view === 'curves') body = curvesView(data);
     else if (view === 'bills') body = billsView(data);
     else body = boardView(data);
@@ -1402,12 +1515,12 @@
       <div class="filters">
         <div class="segbar">${types.map(([k, l]) => `<button class="${type === k ? 'on' : ''}" data-action="rankType" data-v="${k}" aria-pressed="${type === k}">${l}</button>`).join('')}</div>
         ${type !== 'all' ? `<div class="period-nav">
-          <button class="icon-btn" data-action="rankShift" data-d="-1" aria-label="Previous">◀</button>
+          <button class="icon-btn" data-action="rankShift" data-d="-1" aria-label="Previous">${IC.chevL}</button>
           <b>${periodLabel(data.range)}</b>
-          <button class="icon-btn" data-action="rankShift" data-d="1" aria-label="Next" ${offset >= 0 ? 'disabled' : ''}>▶</button>
+          <button class="icon-btn" data-action="rankShift" data-d="1" aria-label="Next" ${offset >= 0 ? 'disabled' : ''}>${IC.chevR}</button>
         </div>` : ''}
       </div>
-      <nav class="viewtabs" aria-label="Ranking views">${views.map(([k, ico, l]) => `<button class="${view === k ? 'on' : ''}" data-action="rankView" data-v="${k}" aria-pressed="${view === k}"><span aria-hidden="true">${ico}</span>${l}</button>`).join('')}</nav>
+      <nav class="viewtabs" aria-label="Ranking views">${views.map(([k, ico, l]) => `<button class="${view === k ? 'on' : ''}" data-action="rankView" data-v="${k}" aria-pressed="${view === k}">${ico}<span>${l}</span></button>`).join('')}</nav>
       ${body}`;
   }
 
@@ -1428,16 +1541,16 @@
     };
     const cols = {
       fair: [['P', 'rounds played', (p) => p.roundsPlayed], ['W', 'wins (1st)', (p) => p.roundsWon], ['2nd', '2nd places', (p) => p.p2], ['3rd', '3rd places', (p) => p.p3], ['L', 'last places', (p) => p.plast]],
-      points: [['N', 'nights', (p) => p.nights], ['P', 'rounds played', (p) => p.roundsPlayed], ['W', 'wins (1st)', (p) => p.roundsWon], ['👑', 'crowns', (p) => p.champions]],
+      points: [['N', 'nights', (p) => p.nights], ['P', 'rounds played', (p) => p.roundsPlayed], ['W', 'wins (1st)', (p) => p.roundsWon], [IC.crown, 'crowns', (p) => p.champions]],
       champions: [['N', 'nights', (p) => p.nights], ['W', 'wins (1st)', (p) => p.roundsWon], ['Fair', 'fair points', (p) => fairTxt(p.fair)]],
     }[by];
-    const keyHead = { fair: 'Pts', points: 'Pts', champions: '👑' }[by];
+    const keyHead = { fair: 'Pts', points: 'Pts', champions: IC.crown }[by];
     const table = `<div class="league" style="--cols:${cols.length}">
         <div class="lt-row lt-head" aria-hidden="true"><span class="c-rk">#</span><span class="c-name">Player</span>${cols.map(([h, t]) => `<span class="c-n" title="${t}">${h}</span>`).join('')}<span class="c-key">${keyHead}</span></div>
-        ${list.map((p) => {
+        ${list.map((p, i) => {
           const [v, u] = metric(p);
-          return `<button class="lt-row ${p.rank === 1 ? 'top1' : ''}" data-action="showPlayer" data-id="${p.playerId}" aria-label="${ordinal(p.rank)}: ${nameOf(p.playerId)}, ${v} ${u}, ${plural(p.roundsPlayed, 'round')}">
-            <span class="c-rk ${p.rank <= 3 ? 'medal' : ''}">${medal(p.rank)}</span>
+          return `<button class="lt-row ${p.rank === 1 ? 'top1' : ''}" style="--i:${i}" data-action="showPlayer" data-id="${p.playerId}" aria-label="${ordinal(p.rank)}: ${nameOf(p.playerId)}, ${v} ${u}, ${plural(p.roundsPlayed, 'round')}">
+            <span class="c-rk">${medal(p.rank)}</span>
             <span class="c-name">${avatar(p.playerId, 'sm')}<span class="tname">${nameOf(p.playerId)}</span>${by === 'fair' && p.provisional ? '<i class="tag">new</i>' : ''}</span>
             ${cols.map(([, , f]) => `<span class="c-n">${f(p)}</span>`).join('')}
             <span class="c-key">${v}</span>
@@ -1450,11 +1563,13 @@
       <section class="card board-card">
         <div class="card-head"><h3>${by === 'fair' ? 'League table' : by === 'points' ? 'Overall' : 'Champions'}</h3><span class="muted">${plural(nights.length, 'night')}</span></div>
         ${table}
-        <p class="hint">${RANK_HINT[by]}</p>
-        ${by === 'fair' ? `<p class="hint">${RANK_HINT.fair2}</p>` : ''}
         <p class="hint">Tap a player for all their numbers.</p>
+        <details class="explain"><summary>${by === 'fair' ? 'How fair points work' : 'How this ranking works'}</summary>
+          <p class="hint">${RANK_HINT[by]}</p>
+          ${by === 'fair' ? `<p class="hint">${RANK_HINT.fair2}</p>` : ''}
+        </details>
       </section>
-      <button class="primary" data-action="shareRanking">📤 Share this ranking</button>`;
+      <button class="primary" data-action="shareRanking">${IC.share}Share this ranking</button>`;
   }
 
   /* --- stats: one wide table, sticky names, sortable --- */
@@ -1471,9 +1586,11 @@
     { k: 'winRate', h: 'Win %', f: (p) => pct0(p.winRate) },
     { k: 'avgResult', h: 'Avg finish', f: (p) => Math.round(p.avgResult) },
     { k: 'pts', h: 'Game pts', f: (p) => ptsTxt(p.pts) },
-    { k: 'champions', h: '👑', f: (p) => p.champions || '·' },
+    { k: 'champions', h: IC.crown, f: (p) => p.champions || '·' },
     { k: 'nights', h: 'Nights', f: (p) => p.nights },
     { k: 'bestNight', h: 'Best night', f: (p) => ptsTxt(p.bestNight || 0) },
+    { k: 'won', h: 'Won', cur: true, f: (p) => moneyNum(p.won), c: (p) => (p.won ? 'pos' : 'zero') },
+    { k: 'lost', h: 'Lost', cur: true, f: (p) => moneyNum(-p.lost), c: (p) => (p.lost ? 'neg' : 'zero') },
     { k: 'money', h: 'Cards', cur: true, f: (p) => moneyNum(p.money, true), c: (p) => cls(p.money) },
     { k: 'fees', h: 'Fees', cur: true, f: (p) => moneyNum(-p.fees), c: (p) => (p.fees ? 'neg' : 'zero') },
     { k: 'bill', h: 'Bills', cur: true, f: (p) => moneyNum(-p.bill), c: (p) => (p.bill ? 'neg' : 'zero') },
@@ -1507,8 +1624,87 @@
           <li><b>P · W · 2nd · 3rd · L</b> rounds played, wins, 2nd and 3rd places, last places</li>
           <li><b>Avg finish</b> 100 = always 1st, 0 = always last</li>
           <li><b>Game pts</b> the points of the nights (they decide each night's champion)</li>
-          <li><b>Cards</b> money won − lost · <b>Fees</b> table + pot as winner · <b>Bills</b> share, extra, when leaving · <b>Net</b> all of it</li>
+          <li><b>Won · Lost</b> money taken from / paid to the others in the rounds · <b>Cards</b> won − lost</li>
+          <li><b>Fees</b> table + pot (as winner, or put in when leaving) · <b>Bills</b> share, extra, when leaving · <b>Net</b> all of it</li>
         </ul>
+      </section>`;
+  }
+
+  /* --- win / loss: who is up, who is down — as a table, and night by night --- */
+  const MONEY_MODES = [['cards', 'Table money'], ['net', 'After fees & bills']];
+  function moneyView({ range, nights }) {
+    const mode = ui.rank.money === 'net' ? 'net' : 'cards';
+    const t = C.moneyTable(nights, mode);
+    const list = t.players;
+    if (!list.length) return '<section class="card"><div class="empty"><span class="big">🂮</span>No money moved in this period.</div></section>';
+    const cur = esc(S().currency);
+    const overall = mode === 'net';
+    const maxAbs = Math.max(1, ...list.map((p) => Math.abs(p.value)));
+    const top = list[0];
+    const low = list[list.length - 1];
+    let best = null;
+    for (const r of t.nights) {
+      for (const [id, c] of Object.entries(r.cells)) if (!best || c.value > best.value) best = { id, value: c.value, date: r.date };
+    }
+    const wl = (p) => `${p.up}–${p.down}`;
+    // a bar from the middle: right = up, left = down (the sign is printed too)
+    const bar = (v) => {
+      const w = Math.min(50, (Math.abs(v) / maxAbs) * 50);
+      return `<span class="dbar" aria-hidden="true"><i class="${v >= 0 ? 'up' : 'down'}" style="${v >= 0 ? 'left' : 'right'}:50%;width:${w.toFixed(1)}%"></i></span>`;
+    };
+    const rows = list.map((p, i) => `
+      <button class="wl-row ${p.rank === 1 && p.value > 0 ? 'top1' : ''}" style="--i:${i}" data-action="showPlayer" data-id="${p.playerId}"
+        aria-label="${ordinal(p.rank)}: ${nameOf(p.playerId)}, ${p.up} nights up and ${p.down} down, won ${moneyHtml(p.won)}, lost ${moneyHtml(p.lost)}${overall ? `, fees and bills ${moneyHtml(p.costs)}` : ''}, ${overall ? 'net' : 'table money'} ${moneyHtml(p.value, true)}">
+        <span class="c-rk">${medal(p.rank)}</span>
+        <span class="c-name">${avatar(p.playerId, 'sm')}<span class="tname">${nameOf(p.playerId)}</span></span>
+        <span class="c-n">${wl(p)}</span>
+        <span class="c-n">${moneyNum(p.won)}</span>
+        <span class="c-n">${p.lost ? moneyNum(-p.lost) : '0'}</span>
+        ${overall ? `<span class="c-n">${p.costs ? moneyNum(-p.costs) : '0'}</span>` : ''}
+        <span class="c-key ${cls(p.value)}">${moneyNum(p.value, true)}</span>
+        ${bar(p.value)}
+      </button>`).join('');
+    // night by night: one row per night, one column per player (same order as the table)
+    const tint = (v) => (v ? ` style="--a:${(0.16 + 0.5 * Math.min(1, Math.abs(v) / maxAbs)).toFixed(2)}"` : '');
+    const ledger = `<div class="stat-scroll" data-keep="ledger" tabindex="0" role="region" aria-label="Win and loss night by night, scrolls sideways">
+        <table class="stat-table ledger">
+          <thead><tr><th class="sticky" scope="col">Night</th>${list.map((p) => `<th scope="col"><span class="lg-head">${avatar(p.playerId, 'sm')}<span>${nameOf(p.playerId)}</span></span></th>`).join('')}</tr></thead>
+          <tbody>${t.nights.map((r) => `<tr>
+            <th class="sticky" scope="row"><button data-action="openNight" data-id="${r.nightId}"><b>${esc(DAYMON_FMT.format(toDate(r.date)))}</b><small>${plural(r.rounds, 'round')}</small></button></th>
+            ${list.map((p) => {
+              const c = r.cells[p.playerId];
+              if (!c) return '<td class="gone">·</td>';
+              return `<td class="${c.value > 0 ? 'up' : c.value < 0 ? 'down' : 'even'}"${tint(c.value)}>${moneyNum(c.value, true)}${c.champion ? IC.crown : ''}</td>`;
+            }).join('')}
+          </tr>`).join('')}</tbody>
+          <tfoot><tr><th class="sticky" scope="row">Total</th>${list.map((p) => `<td class="${cls(p.value)}">${moneyNum(p.value, true)}</td>`).join('')}</tr></tfoot>
+        </table>
+      </div>`;
+    return `
+      <div class="segbar money-mode">${MONEY_MODES.map(([k, l]) => `<button class="${mode === k ? 'on' : ''}" data-action="rankMoney" data-v="${k}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>
+      <div class="tiles">
+        <div class="tile"><span class="t-ico">${IC.updown}</span><small>Most up</small><b class="${cls(top.value)}">${moneyHtml(top.value, true)}</b><span>${nameOf(top.playerId)} · ${wl(top)} nights</span></div>
+        <div class="tile"><span class="t-ico">${IC.updown}</span><small>Most down</small><b class="${cls(low.value)}">${moneyHtml(low.value, true)}</b><span>${nameOf(low.playerId)} · ${wl(low)} nights</span></div>
+        <div class="tile"><span class="t-ico">${IC.crown}</span><small>Best night</small><b class="${cls(best ? best.value : 0)}">${moneyHtml(best ? best.value : 0, true)}</b><span>${best ? `${nameOf(best.id)} · ${esc(DAYMON_FMT.format(toDate(best.date)))}` : '—'}</span></div>
+        <div class="tile"><span class="t-ico">${IC.pot}</span><small>On the table</small><b>${moneyHtml(t.moved)}</b><span>won &amp; lost · ${plural(t.rounds, 'round')}</span></div>
+      </div>
+      <section class="card wl-card">
+        <div class="card-head"><h3>${IC.updown}Win / Loss</h3><span class="muted">${esc(periodLabel(range))}</span></div>
+        <div class="wl ${overall ? '' : 'cards'}">
+          <div class="wl-row wl-head" aria-hidden="true"><span class="c-rk">#</span><span class="c-name">Player</span><span class="c-n" title="nights up – nights down">W–L</span><span class="c-n">Won</span><span class="c-n">Lost</span>${overall ? '<span class="c-n" title="fees + bills">Costs</span>' : ''}<span class="c-key">Net ${cur}</span></div>
+          ${rows}
+        </div>
+        <ul class="col-help">
+          <li><b>W–L</b> nights you ended up · nights you ended down</li>
+          <li><b>Won · Lost</b> money taken from / paid to the others in the rounds</li>
+          ${overall ? `<li><b>Costs</b> table + pot fees, and your part of the bills</li>
+          <li><b>Net</b> won − lost − costs: what you are really up or down</li>` : `<li><b>Net</b> won − lost at the table. Over everyone it adds up to zero. Switch to “After fees &amp; bills” for what you are really up or down.</li>`}
+        </ul>
+      </section>
+      <section class="card table-card">
+        <div class="card-head"><h3>${IC.calendar}Night by night</h3><span class="muted">${plural(t.nights.length, 'night')}</span></div>
+        <p class="hint" style="margin:0 0 10px">${overall ? 'Each night after fees and bills.' : 'Table money of each night (won − lost).'} <span class="sw up"></span>up · <span class="sw down"></span>down · ${IC.crown} champion. Tap a date to open the night.</p>
+        ${ledger}
       </section>`;
   }
 
@@ -1598,7 +1794,7 @@
           <span class="hbar-track"><span class="hbar" style="width:${Math.max(p.total > 0 ? 3 : 0, (p.total / maxPaid) * 100).toFixed(1)}%">${kinds.filter(([k]) => p[k] > 0).map(([k, c]) => `<i style="flex:${p[k]};background:${c}"></i>`).join('')}</span></span>
           <small class="payer-parts">share ${moneyHtml(p.share)}${p.extra ? ` · extra ${moneyHtml(p.extra)}` : ''}${p.left ? ` · when leaving ${moneyHtml(p.left)}` : ''} · pot fees ${moneyHtml(p.potFees)}</small>
         </button>`).join('')}
-        <p class="hint">Pot fees are what they put in the pot as round winners — the pot pays the bill first.</p>
+        <p class="hint">Pot fees are what they put in the pot (as round winners, or when leaving) — the pot pays the bill first.</p>
       </section>
       <section class="card">
         <h3>Night by night</h3>
@@ -1627,13 +1823,22 @@
       ['Rounds', `P ${p.roundsPlayed} · W ${p.roundsWon}`, `2nd ${p.p2} · 3rd ${p.p3} · last ${p.plast}`],
       ['Per round', p.ppr.toFixed(2), `win ${pct0(p.winRate)} · avg finish ${Math.round(p.avgResult)}`],
       ['Game points', ptsTxt(p.pts), `${ptsTxt(p.avgPts)} a night`],
-      ['Crowns', `👑 ${p.champions}`, plural(p.nights, 'night')],
+      ['Crowns', String(p.champions), `champion ${p.champions === 1 ? 'once' : `${p.champions} times`} in ${plural(p.nights, 'night')}`],
       ['Best night', `${ptsTxt(p.bestNight || 0)} pts`, p.leftEarly ? `left early ${p.leftEarly}×` : ''],
       ['Cards', money(p.money, true), `won ${money(p.won)} · lost ${money(p.lost)}`],
       ['Fees', money(p.fees), `pot ${money(p.potFees)} · table ${money(p.tableFees)}`],
       ['Bills paid', money(p.bill), `${p.billNights} ${p.billNights === 1 ? 'night' : 'nights'} · most ${money(p.billMax)}`],
       ['Overall', money(p.total, true), 'cards − fees − bills'],
     ];
+    // head to head: who they won the most from, and lost the most to
+    const flows = C.headToHead(data.nights);
+    const rivals = data.all.filter((x) => x.playerId !== id).map((x) => ({ id: x.playerId, v: C.vs(flows, id, x.playerId) }));
+    const fav = rivals.filter((x) => x.v > 0).sort((a, b) => b.v - a.v)[0];
+    const nem = rivals.filter((x) => x.v < 0).sort((a, b) => a.v - b.v)[0];
+    if (fav || nem) {
+      tiles.push(['Won most from', fav ? P(fav.id).name : '—', fav ? `${money(fav.v, true)} against them` : 'nobody yet']);
+      tiles.push(['Lost most to', nem ? P(nem.id).name : '—', nem ? `${money(nem.v, true)} against them` : 'nobody yet']);
+    }
     return {
       title: `${avatar(id, 'lg')}<span class="pc-name">${nameOf(id)}</span>`,
       body: `<p class="pc-period">${esc(periodLabel(data.range))} · ${plural(p.nights, 'night')}</p>
@@ -1677,19 +1882,19 @@
       lastMonth = m;
       return `${head}<button class="night" data-action="openNight" data-id="${n.id}">
         <span class="night-date"><b>${d.getDate()}</b><small>${d.toLocaleDateString('en-GB', { month: 'short' }).toUpperCase()}</small></span>
-        <span class="night-main"><b>${sum.champions.length ? `👑 ${esc(namesJoin(sum.champions))}` : 'No champion'}</b>
+        <span class="night-main"><b>${sum.champions.length ? `${IC.crown}${esc(namesJoin(sum.champions))}` : 'No champion'}</b>
           <small>${plural(n.playerIds.length, 'player')} · ${plural(sum.rounds, 'round')}${n.bill ? ` · bill ${moneyHtml(n.bill.invoice)}` : ''}</small></span>
         <span class="score">${sum.champions.length ? ptsTxt(sum.players[0].pts) : ''}<small>${sum.champions.length ? 'pts' : ''}</small></span>
       </button>`;
     }).join('');
     return `
-      <h2 class="page-title">📅 History</h2>
+      <h2 class="page-title">History</h2>
       ${syncBar()}
       <p class="page-sub">Every night, its champion and the full report.</p>
       ${live ? `<button class="night" data-action="tab" data-tab="play">
         <span class="night-date"><b>${toDate(live.date).getDate()}</b><small>NOW</small></span>
         <span class="night-main"><b><span class="live-dot"></span>Game in progress</b><small>${plural(live.playerIds.length, 'player')} · ${plural(live.rounds.length, 'round')}</small></span>
-        <span class="link">Open →</span></button>` : ''}
+        <span class="link">Open${IC.chevR}</span></button>` : ''}
       ${rows || (live ? '' : '<section class="card"><div class="empty"><span class="big">🂠</span>No nights yet. Your history will show up here.</div></section>')}`;
   }
 
@@ -1703,17 +1908,17 @@
       const st = statsBy[p.id];
       return `<div class="prow">
         <button class="av-btn" data-action="cycleEmoji" data-id="${p.id}" aria-label="Change avatar of ${esc(p.name)}">${avatar(p.id, 'lg')}</button>
-        <span class="nm"><span class="name">${esc(p.name)}</span><small>${st ? `${fairTxt(st.fair)} fair pts · ${plural(st.nights, 'night')} · 👑 ${st.champions} · <span class="${cls(st.total)}">${moneyHtml(st.total, true)}</span>` : 'No nights yet'}</small></span>
+        <span class="nm"><span class="name">${esc(p.name)}</span><small>${st ? `${fairTxt(st.fair)} fair pts · ${plural(st.nights, 'night')} · <span class="crowns-n">${IC.crown}${st.champions}</span> · <span class="${cls(st.total)}">${moneyHtml(st.total, true)}</span>` : 'No nights yet'}</small></span>
         <span class="acts">
-          ${st ? `<button class="icon-btn" data-action="showPlayer" data-id="${p.id}" data-scope="all" aria-label="All-time numbers of ${esc(p.name)}">📊</button>` : ''}
-          <button class="icon-btn" data-action="renamePlayer" data-id="${p.id}" aria-label="Rename ${esc(p.name)}">✎</button>
-          <button class="icon-btn" data-action="toggleHide" data-id="${p.id}" aria-label="${p.hidden ? 'Show' : 'Hide'} ${esc(p.name)}">${p.hidden ? '↩︎' : '🙈'}</button>
-          ${!st && !db.nights.some((n) => n.playerIds.includes(p.id)) ? `<button class="icon-btn" data-action="deletePlayer" data-id="${p.id}" aria-label="Delete ${esc(p.name)}">🗑</button>` : ''}
+          ${st ? `<button class="icon-btn" data-action="showPlayer" data-id="${p.id}" data-scope="all" aria-label="All-time numbers of ${esc(p.name)}">${IC.stats}</button>` : ''}
+          <button class="icon-btn" data-action="renamePlayer" data-id="${p.id}" aria-label="Rename ${esc(p.name)}">${IC.edit}</button>
+          <button class="icon-btn" data-action="toggleHide" data-id="${p.id}" aria-label="${p.hidden ? 'Show' : 'Hide'} ${esc(p.name)}">${p.hidden ? IC.eye : IC.eyeOff}</button>
+          ${!st && !db.nights.some((n) => n.playerIds.includes(p.id)) ? `<button class="icon-btn" data-action="deletePlayer" data-id="${p.id}" aria-label="Delete ${esc(p.name)}">${IC.trash}</button>` : ''}
         </span>
       </div>`;
     };
     return `
-      <h2 class="page-title">👥 Players</h2>
+      <h2 class="page-title">Players</h2>
       <p class="page-sub">Everyone you add is saved for the next game. Tap an avatar to change it.</p>
       <section class="card">
         <div class="add-row">
@@ -1749,7 +1954,7 @@
         <span class="sum ${Math.abs(total - 100) < 0.01 ? 'zero' : 'neg'}">${total}%</span></div>`);
     }
     return `
-      <h2 class="page-title">⚙️ Settings</h2>
+      <h2 class="page-title">Settings</h2>
 
       <section class="card">
         <h3>How CHAMPIONS counts</h3>
@@ -1761,7 +1966,7 @@
           <li>Only the round winner pays fees: <b>${moneyHtml(s.tableFee)}</b> for the table, plus ${potRuleText(s)}.</li>
           <li>At the end, the pot comes off the bill — and so does what anyone paid when leaving early, and any extra money. The rest is paid by the lowest places still at the table (e.g. 4 players: 50 · 30 · 20 %). Ties share equally.</li>
           <li>Someone <b>joining late</b> can get starting points: last place's points, the table average, 0 or any number.</li>
-          <li>Someone <b>leaving early</b> keeps their points, pays what they pay when they go, and is left out of the bill split.</li>
+          <li>Someone <b>leaving early</b> keeps their points and is left out of the bill split. When they go they can put money in the <b>pot</b> and/or pay toward the bill — both come off the bill. Anyone still marked <b>Out</b> when you finish is left out of the bill too.</li>
           <li>The <b>champion</b> of the night is whoever has the most points.</li>
           <li><b>Fair points</b> make the league table, like football: every round adds 3 for a win down to 0 for last, bigger stakes and bigger tables count more, and rounds you missed are filled with your own average (pulled toward the group's until about ${C.FILL_PRIOR} rounds, never for more rounds than you played).</li>
         </ol>
@@ -1803,8 +2008,8 @@
         <h3>Backup &amp; history</h3>
         <p class="hint" style="margin:0 0 12px">Your history is saved on this device. Save a backup now and then (to Files, iCloud Drive or a chat) so it is never lost — or to move it to another phone or Mac.</p>
         <div class="btn-row" style="margin:0">
-          <button class="secondary" data-action="exportData">💾 Save backup</button>
-          <button class="secondary" data-action="pickImport">📂 Load backup</button>
+          <button class="secondary" data-action="exportData">${IC.download}Save backup</button>
+          <button class="secondary" data-action="pickImport">${IC.upload}Load backup</button>
         </div>
         <p class="hint">Last backup: <b>${db.lastBackup ? DATE_FMT.format(new Date(db.lastBackup)) : 'never'}</b> · ${plural(db.players.length, 'player')} · ${plural(db.nights.length, 'night')}</p>
       </section>
@@ -1812,7 +2017,7 @@
       <section class="card">
         <h3>Install the app</h3>
         <ol class="rules">
-          <li><b>iPhone:</b> open the app link in <b>Safari</b> → Share ⬆️ → <b>Add to Home Screen</b>.</li>
+          <li><b>iPhone:</b> open the app link in <b>Safari</b> → <b>Share</b> → <b>Add to Home Screen</b>.</li>
           <li><b>Mac (Safari):</b> File → <b>Add to Dock</b>. <b>Chrome:</b> the install icon in the address bar.</li>
           <li>It works offline once installed.</li>
         </ol>
@@ -1976,12 +2181,12 @@
       const picks = S().stakePicks.length ? S().stakePicks : [1, 2, 3];
       const r = await ask({
         title: `Round ${night.rounds.length} saved!`,
-        body: `<p style="font-size:18px">🥇 <b>${nameOf(w.playerId)}</b> wins ${moneyHtml(w.won)} and +${ptsTxt(w.pts)} pts</p>
+        body: `<p class="saved-line">${medal(1)} <b>${nameOf(w.playerId)}</b> wins ${moneyHtml(w.won)} and +${ptsTxt(w.pts)} pts</p>
           <p>Keep playing? Pick the points for round ${night.rounds.length + 1}:</p>
           <div class="chips">${picks.map((p, i) => `<button class="pchip ${p === round.points ? 'sel' : ''}" data-modal-value="pts:${p}"><span class="disc" style="--c:${CHIP_COLORS[i % CHIP_COLORS.length]}"><b>${p}</b></span><small>${moneyHtml(C.fullAmount(p, S()))}</small></button>`).join('')}</div>`,
         buttons: [
           { label: `Next round with ${ptsTxt(round.points)} pt${round.points === 1 ? '' : 's'} ▶`, value: `pts:${round.points}`, kind: 'primary' },
-          { label: "🏁 We're done for tonight", value: 'done', kind: 'danger' },
+          { label: `${IC.flag}We're done for tonight`, value: 'done', kind: 'danger' },
         ],
       });
       if (r.value === 'done') return actions.finishNight();
@@ -1996,7 +2201,7 @@
       const idx = night.rounds.findIndex((r) => r.id === ds.id);
       if (idx < 0) return;
       const r = night.rounds[idx];
-      if (!(await confirmBox(`Delete round ${idx + 1}?`, `🥇 ${nameOf(r.results[0].playerId)} +${ptsTxt(r.results[0].pts)} pts · ${moneyHtml(r.results[0].won)}<br>Its points, money and fees will be removed.`, 'Delete round'))) return;
+      if (!(await confirmBox(`Delete round ${idx + 1}?`, `${medal(1)} ${nameOf(r.results[0].playerId)} +${ptsTxt(r.results[0].pts)} pts · ${moneyHtml(r.results[0].won)}<br>Its points, money and fees will be removed.`, 'Delete round'))) return;
       const live = activeNight();
       if (!live) return;
       live.rounds = live.rounds.filter((x) => x.id !== ds.id);
@@ -2053,42 +2258,49 @@
       render();
     },
     /* --- leaving early --- */
-    leavePlayer: async () => {
+    /** Someone leaves the table (or, on the bill screen, is taken out of the bill split). ds.id skips the picker. */
+    leavePlayer: async (ds = {}) => {
       const night = activeNight();
       if (!night) return;
       const seated = seatedIds(night);
       if (seated.length < 2) return toast('At least one player has to stay for the bill');
-      const r = await ask({
-        title: 'Who is leaving?',
-        body: `<p class="hint" style="margin:0 0 4px">They keep their points. What they pay now comes off the bill, and they are left out of the split at the end.</p>
-          <div class="pick-grid">${seated.map((id) => `<button class="ptile" data-modal-value="id:${id}">${avatar(id, 'lg')}<span class="pname">${nameOf(id)}</span></button>`).join('')}</div>`,
-        buttons: [{ label: 'Cancel', value: null }],
-      });
-      if (!r.value || !String(r.value).startsWith('id:')) return;
-      const id = String(r.value).slice(3);
-      const paid = await askNumber(`What did ${nameOf(id)} pay toward the bill?`, '', S().currency, 'This comes off the bill. Type 0 if they paid nothing.');
-      if (paid == null) return;
+      const atBill = ui.view === 'bill';
+      let id = ds.id && seated.includes(ds.id) ? ds.id : null;
+      if (!id) {
+        const r = await ask({
+          title: atBill ? 'Who is not in the bill?' : 'Who is leaving?',
+          body: `<p class="hint" style="margin:0 0 4px">${atBill ? 'They keep their points and are left out of the split. They can still put money in the pot or pay something toward the bill.' : 'They keep their points and are left out of the bill split. When they go they can put money in the pot and/or pay toward the bill.'}</p>
+            <div class="pick-grid">${seated.map((x) => `<button class="ptile" data-modal-value="id:${x}">${avatar(x, 'lg')}<span class="pname">${nameOf(x)}</span></button>`).join('')}</div>`,
+          buttons: [{ label: 'Cancel', value: null }],
+        });
+        if (!r.value || !String(r.value).startsWith('id:')) return;
+        id = String(r.value).slice(3);
+      }
+      const m = await askLeaveMoney(id, {}, atBill);
+      if (!m) return;
       const live = activeNight();
-      if (!live || !seatedIds(live).includes(id)) return;
+      if (!live || !seatedIds(live).includes(id) || seatedIds(live).length < 2) return;
       live.leaves = live.leaves || [];
-      live.leaves.push({ id: uid(), playerId: id, paid, afterRound: live.rounds.length, at: Date.now(), updatedAt: Date.now() });
+      live.leaves.push({ id: uid(), playerId: id, paid: m.paid, pot: m.pot, afterRound: atBill ? lastRoundOf(live, id) : live.rounds.length, at: Date.now(), updatedAt: Date.now() });
       if (ui.draft && ui.draft.nightId === live.id) ui.draft.order = ui.draft.order.filter((x) => x !== id);
       touch(live);
       save();
       sfx.chip();
       render();
-      toast(`👋 ${P(id).name} left${paid ? ` · paid ${money(paid)}` : ''}`);
+      const paidTxt = leftMoneyTxt(m.pot, m.paid);
+      toast(atBill ? `${P(id).name} is not in the bill${paidTxt ? ` · ${paidTxt}` : ''}` : `👋 ${P(id).name} left${paidTxt ? ` · ${paidTxt}` : ''}`);
     },
     editLeave: async (ds) => {
       const n0 = activeNight();
       const l0 = n0 && (n0.leaves || []).find((x) => x.id === ds.id);
       if (!l0) return;
-      const v = await askNumber(`What did ${nameOf(l0.playerId)} pay toward the bill?`, l0.paid || 0, S().currency, 'This comes off the bill.');
-      if (v == null) return;
+      const m = await askLeaveMoney(l0.playerId, { pot: l0.pot || 0, paid: l0.paid || 0 }, ui.view === 'bill');
+      if (!m) return;
       const night = activeNight();
       const l = night && (night.leaves || []).find((x) => x.id === ds.id);
       if (!l) return;
-      l.paid = v;
+      l.paid = m.paid;
+      l.pot = m.pot;
       touch(l);
       touch(night);
       save();
@@ -2104,6 +2316,8 @@
       const gone = (night.leaves || []).filter((x) => x.playerId === l0.playerId);
       night.leaves = (night.leaves || []).filter((x) => x.playerId !== l0.playerId);
       gone.forEach((x) => tomb('leaves', x.id));
+      // no longer marked Out either, so they stay in the split
+      if (ui.draft && ui.draft.nightId === night.id && ui.draft.out) delete ui.draft.out[l0.playerId];
       touch(night);
       save();
       render();
@@ -2144,10 +2358,23 @@
         }
         return;
       }
+      // whoever is still marked Out has left the table: they are not in the bill split
+      const outs = outNow(night);
+      const moveOut = outs.length > 0 && outs.length < seatedIds(night).length; // somebody has to stay for the bill
+      if (moveOut) {
+        const now = Date.now();
+        night.leaves = night.leaves || [];
+        for (const id of outs) {
+          night.leaves.push({ id: uid(), playerId: id, paid: 0, afterRound: lastRoundOf(night, id), out: true, at: now, updatedAt: now });
+        }
+        touch(night);
+        save();
+      }
       ui.billInput = '';
       ui.billTable = !!S().tableToInvoice;
       ui.billExtras = [];
       go({ view: 'bill' });
+      if (moveOut) toast(`${namesJoin(outs)} ${outs.length > 1 ? 'were' : 'was'} Out → not in the bill`, 3200);
       setTimeout(() => {
         const inp = $('#bill-input');
         inp && inp.focus();
@@ -2225,6 +2452,11 @@
     },
     rankView: (ds) => {
       ui.rank.view = ds.v;
+      sfx.tap();
+      render();
+    },
+    rankMoney: (ds) => {
+      ui.rank.money = ds.v === 'net' ? 'net' : 'cards';
       sfx.tap();
       render();
     },

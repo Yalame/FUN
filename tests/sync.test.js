@@ -88,6 +88,15 @@ test('the newer edit of what a leaver paid wins', () => {
   assert.strictEqual(m.nights[0].leaves[0].paid, 25);
 });
 
+test('pot money put in when leaving and the Out mark travel with the leave, newest edit wins', () => {
+  const night = (pot, t) => ({ id: 'n1', status: 'active', playerIds: ['p1', 'p2'], rounds: [], joins: [], leaves: [{ id: 'l1', playerId: 'p1', paid: 0, pot, out: true, afterRound: 3, updatedAt: t }], updatedAt: t });
+  const m = Y.mergeData({ ...base(), nights: [night(5, 3)] }, { ...base(), nights: [night(10, 8)] });
+  assert.strictEqual(m.nights[0].leaves[0].pot, 10);
+  assert.strictEqual(m.nights[0].leaves[0].out, true);
+  // and it changes the fingerprint, so the edit is uploaded
+  assert.notStrictEqual(Y.fingerprint({ ...base(), nights: [night(5, 3)] }), Y.fingerprint({ ...base(), nights: [night(10, 3)] }));
+});
+
 test('nights from before leaving-early existed are not changed by a merge', () => {
   const a = { ...base(), nights: [{ id: 'n1', status: 'finished', playerIds: ['p1'], rounds: [round('r1', 1)], joins: [], updatedAt: 1 }] };
   const m = Y.mergeData(a, Y.toPayload(a));

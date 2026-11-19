@@ -133,7 +133,7 @@
       if (!per.has(id)) {
         per.set(id, {
           playerId: id, pts: 0, start: 0, won: 0, lost: 0, table: 0, pot: 0, roundsWon: 0, roundsPlayed: 0,
-          left: false, leftPaid: 0, leftAfter: null,
+          left: false, leftPaid: 0, leftPot: 0, leftAfter: null, leftOut: false,
         });
       }
       return per.get(id);
@@ -146,17 +146,23 @@
       p.start += v;
       p.pts += v;
     }
-    // players who left early: what they paid toward the bill when they went
+    // players who left early (or were still marked Out when the night ended): they are
+    // not in the bill split. When they go they may put money in the pot (it goes in the
+    // pot like a pot fee) and/or pay toward the bill — both come off the bill.
     let leftTotal = 0;
+    let potTotal = 0;
+    let tableTotal = 0;
     for (const [id, l] of leavesBy(night)) {
       const p = get(id);
       p.left = true;
       p.leftPaid = r2(Math.max(0, Number(l.paid) || 0));
+      p.leftPot = r2(Math.max(0, Number(l.pot) || 0));
       p.leftAfter = Number(l.afterRound) || 0;
+      p.leftOut = !!l.out;
+      p.pot += p.leftPot;
+      potTotal += p.leftPot;
       leftTotal += p.leftPaid;
     }
-    let potTotal = 0;
-    let tableTotal = 0;
     for (const round of night.rounds || []) {
       for (const r of round.results) {
         const p = get(r.playerId);
@@ -194,7 +200,8 @@
     const top = players.length ? players[0].pts : 0;
     const allEqual = players.every((p) => p.pts === top);
     const champions = rounds > 0 && !allEqual ? players.filter((p) => p.pts === top).map((p) => p.playerId) : [];
-    return { players, potTotal: r2(potTotal), tableTotal: r2(tableTotal), leftTotal: r2(leftTotal), champions, rounds };
+    const leftPotTotal = r2(players.reduce((a, p) => a + p.leftPot, 0));
+    return { players, potTotal: r2(potTotal), tableTotal: r2(tableTotal), leftTotal: r2(leftTotal), leftPotTotal, champions, rounds };
   }
 
   /** Bill shares (percent, last place first) for a number of players. */
@@ -257,7 +264,7 @@
 
     const leavers = summary.players
       .filter((p) => p.left)
-      .map((p) => ({ playerId: p.playerId, paid: p.leftPaid, afterRound: p.leftAfter, rank: p.rank }));
+      .map((p) => ({ playerId: p.playerId, paid: p.leftPaid, pot: p.leftPot, afterRound: p.leftAfter, out: !!p.leftOut, rank: p.rank }));
     // everything each player paid toward the bill: ranked share + extra + paid when leaving
     const byPlayer = {};
     for (const p of summary.players) byPlayer[p.playerId] = 0;
@@ -275,6 +282,7 @@
       tableUsed,
       tableToInvoice: !!bill.tableToInvoice,
       leftTotal,
+      leftPotTotal: r2(summary.leftPotTotal || 0), // part of the pot: put in by players leaving
       extrasTotal,
       extras,
       leavers,
@@ -579,6 +587,94 @@
     return { totals, avg: totals.nights ? r2(totals.invoice / totals.nights) : 0, rows, players };
   }
 
+  /**
+   * Win / loss: the money of every player, over the period and night by night.
+   *   won, lost  money taken from / paid to other players in the rounds
+   *   cards      won − lost: the table money (adds up to zero over everyone)
+   *   costs      table + pot fees (as round winner or when leaving) + what they paid toward the bills
+   *   net        cards − costs: what they are really up or down (same as aggregate().total)
+   * by: 'cards' (table money) or 'net' (after fees & bills) decides the order, the
+   *   value of each night (cell.value) and the record: up / down = nights above / below zero.
+   * players: best first · nights: newest first, a cell per player who played that night.
+   */
+  function moneyTable(nights, by = 'net') {
+    const key = by === 'cards' ? 'cards' : 'net';
+    const list = playedNights(nights).slice().sort(byDate).reverse();
+    const per = new Map();
+    const rows = [];
+    for (const night of list) {
+      const sum = nightSummary(night);
+      const plan = night.bill ? billPlan(sum, night.bill) : null;
+      const cells = {};
+      for (const p of sum.players) {
+        const bill = r2(plan ? plan.byPlayer[p.playerId] || 0 : 0);
+        const costs = r2(p.fees + bill);
+        const net = r2(p.money - costs);
+        const champion = sum.champions.includes(p.playerId);
+        const cell = { won: p.won, lost: p.lost, cards: p.money, fees: p.fees, bill, costs, net, champion };
+        cell.value = cell[key];
+        cells[p.playerId] = cell;
+        if (!per.has(p.playerId)) {
+          per.set(p.playerId, { playerId: p.playerId, nights: 0, up: 0, down: 0, even: 0, won: 0, lost: 0, fees: 0, bill: 0, best: null, bestDate: '', worst: null, worstDate: '' });
+        }
+        const a = per.get(p.playerId);
+        const v = cell.value;
+        a.nights += 1;
+        a.won += p.won;
+        a.lost += p.lost;
+        a.fees += p.fees;
+        a.bill += bill;
+        if (v > 0) a.up += 1;
+        else if (v < 0) a.down += 1;
+        else a.even += 1;
+        if (a.best === null || v > a.best) {
+          a.best = v;
+          a.bestDate = String(night.date);
+        }
+        if (a.worst === null || v < a.worst) {
+          a.worst = v;
+          a.worstDate = String(night.date);
+        }
+      }
+      const moved = r2(sum.players.reduce((x, p) => x + p.won, 0));
+      rows.push({ nightId: night.id, date: night.date, rounds: (night.rounds || []).length, moved, cells });
+    }
+    const players = [...per.values()]
+      .map((a) => {
+        const cards = r2(a.won - a.lost);
+        const costs = r2(a.fees + a.bill);
+        const net = r2(cards - costs);
+        const value = key === 'cards' ? cards : net;
+        return { ...a, won: r2(a.won), lost: r2(a.lost), fees: r2(a.fees), bill: r2(a.bill), cards, costs, net, value, avg: a.nights ? r2(value / a.nights) : 0 };
+      })
+      .sort((x, y) => y.value - x.value || y.cards - x.cards || y.up - x.up);
+    assignRanks(players, (p) => p.value);
+    return { by: key, players, nights: rows, moved: r2(rows.reduce((x, r) => x + r.moved, 0)), rounds: rows.reduce((x, r) => x + r.rounds, 0) };
+  }
+
+  /**
+   * Head to head: the money that went from each player to each round winner.
+   * flows[from][to] = amount · vs(flows, a, b) = what a won from b minus what a lost to b.
+   */
+  function headToHead(nights) {
+    const flows = {};
+    for (const night of playedNights(nights)) {
+      for (const round of night.rounds || []) {
+        const w = (round.results || []).find((r) => r.place === 1);
+        if (!w) continue;
+        for (const r of round.results) {
+          if (r.place === 1 || !(r.lost > 0)) continue;
+          const from = (flows[r.playerId] = flows[r.playerId] || {});
+          from[w.playerId] = r2((from[w.playerId] || 0) + r.lost);
+        }
+      }
+    }
+    return flows;
+  }
+  function vs(flows, a, b) {
+    return r2(((flows[b] || {})[a] || 0) - ((flows[a] || {})[b] || 0));
+  }
+
   function isoDate(d) {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -614,7 +710,7 @@
   const Calc = {
     r2, DEFAULT_SETTINGS, DEFAULT_SPLITS, RULES_REV, upgradeRules, potFee, fullAmount, buildRound, leavesBy, nightSummary,
     sharesFor, billPlan, billByPlayer, roundWeight, roundResult, meanWeight, leaguePoints, fairPoints, WIN_POINTS, FILL_PRIOR,
-    aggregate, sortStandings, timeline, billStats, isoDate, periodRange, inRange,
+    aggregate, sortStandings, timeline, billStats, moneyTable, headToHead, vs, isoDate, periodRange, inRange,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Calc;
   else root.Calc = Calc;

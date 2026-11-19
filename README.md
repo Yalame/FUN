@@ -21,8 +21,12 @@ It runs in any browser and installs on iPhone and Mac like a normal app. Works o
    Players tied on points share equally (e.g. 50 + 30 → 40 / 40).
 7. **Late joiners** — someone joining mid-night can get starting points: last place's points,
    the table average, 0 or any number (changeable later from the Rounds list).
-8. **Leaving early** — 👋 *Player leaves*: they keep their points, you note what they paid toward the
-   bill, and they are left out of the bill split. Undo with ↩︎ if they come back.
+8. **Leaving early** — *Player leaves*: they keep their points and are left out of the bill split.
+   When they go they can put money **in the pot** (like a pot fee — quick 5 € / 10 € buttons) and/or
+   pay something **toward the bill**; both come off the bill for the others. Undo if they come back.
+   **Out at the end = not in the bill:** anyone still marked *Out* on the round screen when you tap
+   *We're done* is moved to *Not in the bill* by itself (paid nothing; change it there or put them back).
+   On the bill screen ✕ next to a name takes that player out of the split too.
 9. **Extra money** — on the bill screen, *Extra money* records someone paying more; it comes off the
    bill for everyone (like the pot) and the payer still takes part in the split.
 10. **Champion** — most points of the night (a tie gives two champions).
@@ -44,8 +48,14 @@ Pick a week, month, year or all time, then:
 
 - **Ranking** — podium and a football-style league table by *Fair* points (P · W · 2nd · 3rd · L · Pts),
   *Overall* (game points) or *Champions* (crowns). Tap anyone for their player card with every number.
+- **Win/Loss** — who is up and who is down, as a table: W–L (nights ended up – down), money won,
+  money lost and net, with a bar from the middle (blue up, red down). Switch between *Table money*
+  (won − lost at the table — it adds up to zero over everyone) and *After fees & bills* (what you are
+  really up or down). Below it, *Night by night*: every night's result per player, tinted by how big
+  it was, with a crown for the champion. The player card also shows who you won the most from and
+  lost the most to.
 - **Stats** — one table with everything (fair points, earned, missed-round points, P/W/2nd/3rd/L,
-  points per round, win %, average finish, game points, crowns, best night, cards won/lost, fees,
+  points per round, win %, average finish, game points, crowns, best night, won, lost, cards, fees,
   bills, net); names stay put while the numbers scroll sideways.
   Tap a column to sort.
 - **Curves** — how the league position, fair points, game points or money moved night by night. Touch the chart to
@@ -57,8 +67,8 @@ Pick a week, month, year or all time, then:
 
 | File | What it is |
 | --- | --- |
-| `index.html`, `styles.css`, `app.js` | the app screens (the poker table background is in `index.html` + `styles.css`) |
-| `calc.js` | all the math (points, money, fees, bill, leavers, extra money, fair score, curves, bill stats) |
+| `index.html`, `styles.css`, `app.js` | the app screens (the poker table — leather rail, wooden racetrack, felt — is in `index.html` + `styles.css`; line icons and chip rank badges in `app.js`) |
+| `calc.js` | all the math (points, money, fees, bill, leavers and their pot money, extra money, fair points, curves, bill stats, win / loss, head to head) |
 | `charts.js` | the ranking curves and trend lines (plain SVG, works offline) |
 | `sync.js` | how phones merge their data for team sync |
 | `tests/*.test.js` | checks the math and sync — `node tests/calc.test.js && node tests/sync.test.js` |

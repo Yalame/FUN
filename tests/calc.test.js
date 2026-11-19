@@ -363,6 +363,107 @@ test('curves: the last step of the timeline matches the table', () => {
   assert.strictEqual(steps[1].standings[0].rank, 1);
 });
 
+test('a player still marked Out when the night ends is not in the bill (paid nothing)', () => {
+  const rounds = [C.buildRound(1, ['A', 'B', 'C', 'D'], {}, S), C.buildRound(1, ['B', 'A', 'C'], {}, S), C.buildRound(1, ['C', 'A', 'B'], {}, S)];
+  // D sat out the last two rounds and was still Out at the end → the app saves it like leaving, paid 0, out: true
+  const n = night(['A', 'B', 'C', 'D'], rounds, { leaves: [{ id: 'l1', playerId: 'D', paid: 0, afterRound: 1, out: true, at: 1, updatedAt: 1 }] });
+  const sum = C.nightSummary(n);
+  const d = sum.players.find((p) => p.playerId === 'D');
+  assert.ok(d.left && d.leftOut, 'D is marked as out');
+  assert.strictEqual(d.leftAfter, 1);
+  const plan = C.billPlan(sum, { invoice: 100, shares: C.sharesFor(3, S) });
+  assert.strictEqual(plan.payers, 3);
+  assert.ok(!plan.lines.some((l) => l.playerId === 'D'), 'D is not in the split');
+  assert.strictEqual(plan.byPlayer.D, 0);
+  assert.strictEqual(C.r2(plan.lines.reduce((a, l) => a + l.amount, 0)), C.r2(100 - sum.potTotal));
+});
+
+test('someone leaving can put money in the pot: it joins the pot, comes off the bill, and counts as their fee', () => {
+  const rounds = [C.buildRound(1, ['A', 'B', 'C', 'D'], {}, S), C.buildRound(1, ['B', 'A', 'C'], {}, S)];
+  const base = night(['A', 'B', 'C', 'D'], rounds, { leaves: [{ id: 'l1', playerId: 'D', paid: 0, afterRound: 1, at: 1, updatedAt: 1 }] });
+  const withPot = night(['A', 'B', 'C', 'D'], rounds, { leaves: [{ id: 'l1', playerId: 'D', paid: 0, pot: 10, afterRound: 1, at: 1, updatedAt: 1 }] });
+  const s0 = C.nightSummary(base);
+  const s1 = C.nightSummary(withPot);
+  const d0 = s0.players.find((p) => p.playerId === 'D');
+  const d1 = s1.players.find((p) => p.playerId === 'D');
+  assert.strictEqual(s1.potTotal, C.r2(s0.potTotal + 10), 'the pot grows by 10 €');
+  assert.strictEqual(s1.leftPotTotal, 10);
+  assert.strictEqual(d1.leftPot, 10);
+  assert.strictEqual(d1.fees, C.r2(d0.fees + 10), 'it is their fee, like a pot fee');
+  assert.strictEqual(d1.net, C.r2(d0.net - 10));
+  const bill = { invoice: 120, shares: C.sharesFor(3, S) };
+  const p0 = C.billPlan(s0, bill);
+  const p1 = C.billPlan(s1, bill);
+  assert.strictEqual(p1.remaining, C.r2(p0.remaining - 10), 'the others pay 10 € less');
+  assert.strictEqual(p1.leftPotTotal, 10);
+  assert.strictEqual(p1.payers, 3);
+  assert.strictEqual(p1.byPlayer.D, 0, 'nothing toward the bill itself');
+  assert.strictEqual(p1.leavers[0].pot, 10);
+  // pot and bill money together
+  const both = night(['A', 'B', 'C', 'D'], rounds, { leaves: [{ id: 'l1', playerId: 'D', paid: 15, pot: 5, afterRound: 1, at: 1, updatedAt: 1 }] });
+  const p2 = C.billPlan(C.nightSummary(both), bill);
+  assert.strictEqual(p2.remaining, C.r2(p0.remaining - 20));
+  assert.strictEqual(p2.byPlayer.D, 15);
+  // win / loss counts it as a cost of D
+  const t = C.moneyTable([{ ...withPot, bill }]);
+  const d = t.players.find((p) => p.playerId === 'D');
+  assert.strictEqual(d.net, C.r2(d1.money - d1.fees));
+});
+
+test('win / loss: won − lost − fees − bills per player, night by night, and it matches the totals', () => {
+  const nights = [
+    night(['A', 'B', 'C'], [C.buildRound(2, ['A', 'B', 'C'], {}, S), C.buildRound(1, ['B', 'A', 'C'], {}, S)], { id: 'n1', date: '2026-11-02', bill: { invoice: 60, shares: [60, 40] } }),
+    night(['A', 'B', 'C', 'D'], [C.buildRound(1, ['D', 'C', 'B', 'A'], {}, S)], { id: 'n2', date: '2026-11-05' }),
+  ];
+  const t = C.moneyTable(nights);
+  assert.deepStrictEqual(t.nights.map((r) => r.nightId), ['n2', 'n1'], 'newest night first');
+  const agg = Object.fromEntries(C.aggregate(nights).map((a) => [a.playerId, a]));
+  for (const p of t.players) {
+    assert.strictEqual(p.net, agg[p.playerId].total, `${p.playerId} net = overall money in the stats`);
+    assert.strictEqual(p.net, C.r2(p.won - p.lost - p.fees - p.bill));
+    const cells = t.nights.map((r) => r.cells[p.playerId]).filter(Boolean);
+    assert.strictEqual(cells.length, p.nights);
+    assert.strictEqual(C.r2(cells.reduce((a, c) => a + c.net, 0)), p.net, 'the nights add up to the total');
+    assert.strictEqual(p.up + p.down + p.even, p.nights);
+  }
+  for (let i = 1; i < t.players.length; i++) assert.ok(t.players[i - 1].net >= t.players[i].net, 'best first');
+  // money at the table moves between players: all won = all lost
+  const won = t.players.reduce((a, p) => a + p.won, 0);
+  const lost = t.players.reduce((a, p) => a + p.lost, 0);
+  assert.strictEqual(C.r2(won), C.r2(lost));
+  assert.strictEqual(t.moved, C.r2(won));
+  assert.strictEqual(t.rounds, 3);
+  assert.strictEqual(t.nights[1].cells.A.champion, true);
+  // table money only: ordered by won − lost, and it adds up to zero over everyone
+  const c = C.moneyTable(nights, 'cards');
+  assert.strictEqual(c.by, 'cards');
+  for (let i = 1; i < c.players.length; i++) assert.ok(c.players[i - 1].cards >= c.players[i].cards);
+  assert.strictEqual(C.r2(c.players.reduce((a, p) => a + p.value, 0)), 0);
+  for (const p of c.players) {
+    assert.strictEqual(p.value, p.cards);
+    const cells = c.nights.map((r) => r.cells[p.playerId]).filter(Boolean);
+    assert.strictEqual(p.up, cells.filter((x) => x.cards > 0).length, 'record counts table money');
+  }
+});
+
+test('head to head: what each player won from and lost to each other player', () => {
+  const nights = [
+    night(['A', 'B', 'C'], [C.buildRound(1, ['A', 'B', 'C'], {}, S), C.buildRound(1, ['B', 'A', 'C'], { B: 5 }, S)]),
+  ];
+  const f = C.headToHead(nights);
+  // round 1: B and C pay A 10 € each · round 2: B played 5 € and wins → A and C pay B 5 € each
+  assert.strictEqual(f.B.A, 10);
+  assert.strictEqual(f.C.A, 10);
+  assert.strictEqual(f.A.B, 5);
+  assert.strictEqual(f.C.B, 5);
+  assert.strictEqual(C.vs(f, 'A', 'B'), 5);
+  assert.strictEqual(C.vs(f, 'B', 'A'), -5);
+  assert.strictEqual(C.vs(f, 'C', 'A'), -10);
+  const total = Object.values(f).reduce((a, to) => a + Object.values(to).reduce((x, v) => x + v, 0), 0);
+  const won = C.aggregate(nights).reduce((a, p) => a + p.won, 0);
+  assert.strictEqual(C.r2(total), C.r2(won));
+});
+
 test('week runs Monday to Sunday', () => {
   const r = C.periodRange('week', 0, new Date(2026, 10, 8)); // Sun 8 Nov 2026
   assert.strictEqual(r.start, '2026-11-02');
